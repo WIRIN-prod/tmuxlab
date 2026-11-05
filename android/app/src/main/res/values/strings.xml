@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">tmuxlab</string>
+    <string name="title_activity_main">tmuxlab</string>
+    <string name="package_name">com.tmuxlab.app</string>
+    <string name="custom_url_scheme">com.tmuxlab.app</string>
+</resources>

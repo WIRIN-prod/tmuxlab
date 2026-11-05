@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0E1A1C">
+<title>tmuxlab</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="vendor/fonts.css">
+<link rel="stylesheet" href="vendor/xterm.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- connect -->
+<section id="login" class="view" hidden>
+  <form id="login-form" class="login-card">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg>
+    <h1>Connect to a machine</h1>
+    <p>Paste the link the server printed when it started, or enter the address and token.</p>
+    <label>Link or server address<input id="login-url" placeholder="http://100.64.0.2:7681/#token=…" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+    <label>Token<input id="login-token" type="password" placeholder="From ~/.config/tmuxlab/token" autocomplete="off"></label>
+    <p id="login-err" class="err" role="alert"></p>
+    <button class="btn primary">Connect</button>
+  </form>
+</section>
+
+<!-- wall of sessions -->
+<section id="wall" class="view" hidden>
+  <header class="topbar">
+    <div class="brand"><svg class="mark sm" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg><span id="host">tmuxlab</span></div>
+    <div class="stats" id="stats" aria-live="polite"></div>
+    <div class="actions">
+      <button class="btn ghost icon" id="btn-palette" title="Jump to (Ctrl+K)" aria-label="Jump to session">⌕</button>
+      <button class="btn ghost icon" id="btn-settings" title="Settings" aria-label="Settings">⚙</button>
+      <button class="btn primary" id="btn-new">New session</button>
+    </div>
+  </header>
+  <div class="filters" id="filters" role="tablist">
+    <button role="tab" data-f="all" aria-selected="true">All</button>
+    <button role="tab" data-f="running">Running</button>
+    <button role="tab" data-f="idle">Idle</button>
+  </div>
+  <main id="grid" class="grid"></main>
+  <div id="empty" class="empty" hidden>
+    <h2>No tmux sessions on this machine</h2>
+    <p>Start one with a shell, Claude, Codex or a test runner. It keeps running when you close this page.</p>
+    <button class="btn primary" data-new>New session</button>
+  </div>
+</section>
+
+<!-- terminal -->
+<section id="term" class="view" hidden>
+  <header class="termbar">
+    <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions">‹</button>
+    <button class="sname" id="t-name" title="Rename session"></button>
+    <nav class="tabs" id="t-tabs" aria-label="Windows"></nav>
+    <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window (right-click: pick folder)">+</button>
+    <span class="conn" id="t-conn" title="Connection"></span>
+  </header>
+  <div class="wbar" id="t-wbar">
+    <button class="btn sm" id="w-toggle"></button>
+    <button class="btn sm ghost" id="w-restart" title="Interrupt and rerun">Restart</button>
+    <span class="wcmd" id="w-cmd"></span>
+    <span class="spacer"></span>
+    <button class="btn sm ghost" id="w-scroll" title="Scroll back (tmux copy mode)">History</button>
+    <button class="btn sm ghost icon" id="w-font-dec" aria-label="Smaller text">A−</button>
+    <button class="btn sm ghost icon" id="w-font-inc" aria-label="Larger text">A+</button>
+    <button class="btn sm ghost danger" id="w-kill">Close window</button>
+  </div>
+  <div class="termwrap"><div id="xterm"></div><div class="scrollhint" id="scrollhint" hidden>History · swipe down to return<button class="btn sm" id="scroll-exit">Exit</button></div></div>
+  <div class="keys" id="keys" role="toolbar" aria-label="Extra keys"></div>
+  <form class="compose" id="compose">
+    <textarea id="compose-text" rows="1" placeholder="Type or paste, Enter to send" autocapitalize="off" spellcheck="false" aria-label="Send text to terminal"></textarea>
+    <button class="btn primary" aria-label="Send">Send</button>
+  </form>
+</section>
+
+<!-- new session / window -->
+<dialog id="dlg-new" class="sheet">
+  <form method="dialog" id="new-form">
+    <h2 id="new-title">New session</h2>
+    <label id="new-name-row">Name<input id="new-name" pattern="[\w.\-]{1,64}" placeholder="my-app" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <fieldset>
+      <legend>Start with</legend>
+      <div class="presets" id="new-presets"></div>
+    </fieldset>
+    <label>Folder
+      <div class="pathrow"><input id="new-cwd" placeholder="~" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn sm ghost" id="new-browse">Browse</button></div>
+    </label>
+    <div class="browser" id="browser" hidden></div>
+    <div class="recent" id="recent"></div>
+    <div class="row end">
+      <button type="button" class="btn ghost" value="cancel" data-close>Cancel</button>
+      <button class="btn primary" id="new-go" value="ok">Start</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- settings -->
+<dialog id="dlg-settings" class="sheet">
+  <form method="dialog" id="settings-form">
+    <h2>Settings</h2>
+    <p class="muted" id="set-server"></p>
+    <label>Launchers <span class="muted">(JSON: id, label, cmd, icon)</span>
+      <textarea id="set-presets" rows="12" spellcheck="false"></textarea>
+    </label>
+    <p id="set-err" class="err" role="alert"></p>
+    <div class="row">
+      <button type="button" class="btn ghost danger" id="set-logout">Disconnect</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Cancel</button>
+      <button type="button" class="btn primary" id="set-save">Save launchers</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- jump palette -->
+<dialog id="dlg-palette" class="palette">
+  <input id="pal-q" placeholder="Jump to session or window…" autocomplete="off" aria-label="Search sessions">
+  <ul id="pal-list" role="listbox"></ul>
+</dialog>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script src="vendor/addon-web-links.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

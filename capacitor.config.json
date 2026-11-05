@@ -1,0 +1,8 @@
+{
+  "appId": "com.tmuxlab.app",
+  "appName": "tmuxlab",
+  "webDir": "public",
+  "server": { "androidScheme": "http", "cleartext": true },
+  "android": { "allowMixedContent": true },
+  "backgroundColor": "#0E1A1C"
+}
