@@ -57,7 +57,11 @@ $('#login-form').addEventListener('submit', async (e) => {
   if (m) { token = m[1]; raw = raw.slice(0, raw.indexOf('#')); }
   if (!/^https?:\/\//.test(raw)) raw = 'http://' + raw;
   let base;
-  try { base = new URL(raw).origin; } catch { $('#login-err').textContent = 'That address is not a valid URL.'; return; }
+  try {
+    const u = new URL(raw);
+    if (u.protocol === 'http:' && !u.port) u.port = '7681'; // plain http without a port means the tmuxlab default
+    base = u.origin;
+  } catch { $('#login-err').textContent = 'That address is not a valid URL.'; return; }
   if (!token) { $('#login-err').textContent = 'Enter the token, or paste the full link that includes it.'; return; }
   S.cfg = { base, token };
   try {
