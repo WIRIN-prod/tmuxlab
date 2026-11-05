@@ -1,5 +1,5 @@
 // The session wall: live previews, status, approvals, machine stats.
-import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy, whereHtml } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy, whereHtml, whereText, presetIcon, onBack } from './core.js';
 import { openTerm, renderTermBar } from './term.js';
 import { openNew, openChanges, openPalette, openSettings, openSchedules } from './sheets.js';
 import { start, addMachine } from './main.js';
@@ -29,17 +29,18 @@ export async function refreshStats() {
   renderStats();
   for (const card of $$('#grid .card')) {
     const st = S.stats.sessions[card.dataset.s];
-    $('.use', card).textContent = st ? `${Math.round(st.cpu)}% CPU · ${bytes(st.rss)}` : '';
+    $('.use', card).textContent = st ? `${Math.round(st.cpu)}%${card.classList.contains('srow') ? '' : ' CPU'} · ${bytes(st.rss)}` : '';
   }
+  if (Date.now() - countsAt > 15000) countMachines();
 }
 
 function renderStats() {
   const all = S.sessions, m = S.stats?.machine;
   const runs = all.flatMap((s) => s.windows).filter((w) => w.running).length;
   const waiting = all.flatMap((s) => s.windows).filter((w) => w.prompt).length;
-  $('#stats').innerHTML = `<span><b>${all.length}</b> sessions</span><span class="r"><b>${runs}</b> running</span>
-    ${waiting ? `<span class="q"><b>${waiting}</b> waiting</span>` : ''}
-    ${m ? `<span class="machine"><span class="mstat" title="${m.cores} cores, load ${m.load.toFixed(2)}">CPU <b>${m.cpu == null ? '…' : Math.round(m.cpu) + '%'}</b></span>
+  const n = { all: all.length, running: runs, waiting, idle: all.filter((s) => !s.windows.some((w) => w.running)).length };
+  for (const b of $('#filters').children) b.dataset.n = n[b.dataset.f] || '';
+  $('#stats').innerHTML = `${m ? `<span class="machine"><span class="mstat" title="${m.cores} cores, load ${m.load.toFixed(2)}">CPU <b>${m.cpu == null ? '…' : Math.round(m.cpu) + '%'}</b></span>
     <span class="mstat" title="${bytes(m.mem.used)} of ${bytes(m.mem.total)}">RAM <b>${Math.round(100 * m.mem.used / m.mem.total)}%</b></span>
     ${m.disk ? `<span class="mstat ${m.disk.used / m.disk.total > 0.9 ? 'warn' : ''}">Disk <b>${Math.round(100 * m.disk.used / m.disk.total)}%</b></span>` : ''}</span>` : ''}`;
 }
@@ -57,7 +58,9 @@ export async function refreshPreviews() {
   }
 }
 
-const visible = () => S.sessions.filter((s) => S.filter === 'all' ||
+let view = store.get('view', 'list');
+const matches = (s) => { const q = $('#q').value.trim().toLowerCase(); return !q || `${s.name} ${s.windows.map((w) => `${w.name} ${whereText(w)} ${w.branch || ''}`).join(' ')}`.toLowerCase().includes(q); };
+const visible = () => S.sessions.filter(matches).filter((s) => S.filter === 'all' ||
   (S.filter === 'running' ? s.windows.some((w) => w.running) : S.filter === 'waiting' ? s.windows.some((w) => w.prompt) : !s.windows.some((w) => w.running)));
 
 function promptHtml(s, w) {
@@ -75,17 +78,21 @@ export function renderWall() {
   $('#machine-name').textContent = cfg()?.name || (S.info ? `${S.info.user}@${S.info.host}` : '');
   $('#empty').hidden = S.sessions.length > 0 || S.projects.length > 0;
   const grid = $('#grid');
+  grid.classList.toggle('list', view === 'list');
   const list = visible();
+  $('#noresults').hidden = !$('#q').value.trim() || list.length > 0;
+  renderMachines();
   // with projects, the wall is a set of folders; without, just cards
   const nodes = [];
-  if (!S.projects.length) nodes.push(...list.map(cardFor));
+  const item = view === 'list' ? rowFor : cardFor;
+  if (!S.projects.length) nodes.push(...list.map(item));
   else {
     for (const p of [...S.projects, { id: '', label: 'No project' }]) {
       const mine = list.filter((s) => projectOf(s) === p.id);
       const total = S.sessions.filter((s) => projectOf(s) === p.id);
-      if (!mine.length && (S.filter !== 'all' || (!p.id && !total.length))) continue;
+      if (!mine.length && (S.filter !== 'all' || $('#q').value.trim() || (!p.id && !total.length))) continue;
       nodes.push(headerFor(p, total));
-      if (!collapsed.has(p.id)) nodes.push(...mine.map(cardFor));
+      if (!collapsed.has(p.id) || $('#q').value.trim()) nodes.push(...mine.map(item));
     }
   }
   const keep = new Set(nodes);
@@ -114,7 +121,7 @@ function headerFor(p, sessions) {
 
 function cardFor(s) {
   const grid = $('#grid');
-  let card = grid.querySelector(`.card[data-s="${CSS.escape(s.name)}"]`);
+  let card = grid.querySelector(`.card:not(.srow)[data-s="${CSS.escape(s.name)}"]`);
   if (!card) {
     card = document.createElement('article');
     card.className = 'card';
@@ -150,6 +157,31 @@ function cardFor(s) {
   return card;
 }
 
+function rowFor(s) {
+  let row = $('#grid').querySelector(`.srow[data-s="${CSS.escape(s.name)}"]`);
+  if (!row) {
+    row = document.createElement('article');
+    row.className = 'card srow'; row.dataset.s = s.name; row.draggable = !touch;
+    row.innerHTML = `<div class="srow-m" data-a="open" role="button" tabindex="0"></div>
+      <button class="btn ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">${icon('more')}</button><div class="asks"></div>`;
+  }
+  const aw = activeWin(s), asks = s.windows.filter((w) => w.prompt);
+  const rp = aw.panes.find((x) => x.running && x.active) || aw.panes.find((x) => x.running);
+  const st = asks.length ? 'ask' : s.windows.some((w) => w.running) ? 'run' : 'idle';
+  const sig = JSON.stringify([s.windows, s.attached, ago(s.activity)]);
+  if (row.dataset.sig === sig) return row;
+  row.dataset.sig = sig;
+  row.classList.toggle('has-ask', asks.length > 0);
+  const usage = S.stats?.sessions[s.name];
+  $('.srow-m', row).setAttribute('aria-label', `Open ${s.name}`);
+  $('.srow-m', row).innerHTML = `<span class="tile st-${st}" title="${st === 'ask' ? 'Waiting for you' : st === 'run' ? 'Running' : 'Idle'}">${icon(rp ? presetIcon({ cmd: rp.cmd }) : 'terminal')}</span>
+    <span class="srow-t"><span class="l1"><h3>${esc(s.name)}</h3>${s.windows.length > 1 ? `<span class="cnt">${s.windows.length} windows</span>` : ''}${s.attached ? `<span class="cnt att">${s.attached} viewing</span>` : ''}</span>
+    <span class="where">${whereHtml(aw)}</span></span>
+    <span class="srow-r"><span class="when">${ago(s.activity)}</span><span class="use">${usage ? `${Math.round(usage.cpu)}% · ${bytes(usage.rss)}` : ''}</span></span>`;
+  $('.asks', row).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
+  return row;
+}
+
 $('#grid').addEventListener('click', async (e) => {
   const ph = e.target.closest('.phead');
   if (ph) return projectAction(e, ph.dataset.h);
@@ -166,6 +198,9 @@ $('#grid').addEventListener('click', async (e) => {
   else if (a === 'stop') { const b = e.target.closest('[data-a]'); await act(`${W(s.name, b.dataset.t)}/stop`); toast(`Sent ${b.textContent.toLowerCase()}`); setTimeout(refresh, 600); }
   else if (a === 'start') { await act(`${W(s.name, aw.index)}/start`); toast(`Started ${aw.preset}`); setTimeout(refresh, 600); }
   else if (a === 'more') menu(e.target.closest('button'), [
+    ...(() => { const rp = aw.panes.find((x) => x.running && x.active) || aw.panes.find((x) => x.running);
+      return rp ? [{ label: `Stop ${rp.cmd}`, icon: 'x', run: async () => { await act(`${W(s.name, `${aw.index}.${rp.index}`)}/stop`); toast(`Sent stop to ${rp.cmd}`); setTimeout(refresh, 600); } }]
+        : aw.preset ? [{ label: `Start ${aw.preset.split(' ')[0]}`, icon: 'play', run: async () => { await act(`${W(s.name, aw.index)}/start`); toast(`Started ${aw.preset}`); setTimeout(refresh, 600); } }] : []; })(),
     { label: 'New window', icon: 'plus', run: () => menu(e.target.closest('button'), presetItems(async (p) => {
       await act(`/api/sessions/${encodeURIComponent(s.name)}/windows`, { preset: p.id }); toast(`Opened ${p.label}`); refresh();
     })) },
@@ -261,7 +296,7 @@ $('#grid').addEventListener('drop', (e) => {
 });
 
 $('#grid').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.classList.contains('screen')) openTerm(e.target.closest('.card').dataset.s);
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.screen, .srow-m')) { e.preventDefault(); openTerm(e.target.closest('.card').dataset.s); }
 });
 $('#filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-f]'); if (!b) return;
@@ -271,6 +306,56 @@ $('#filters').addEventListener('click', (e) => {
   renderWall(); refreshPreviews();
 });
 $('#btn-new').addEventListener('click', () => openNew());
+$('#fab').addEventListener('click', () => openNew());
+$('#q').addEventListener('input', () => { renderWall(); refreshPreviews(); });
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Escape' && e.target.value) { e.stopPropagation(); e.target.value = ''; renderWall(); } });
+const setView = (v) => {
+  view = v; store.set('view', v);
+  for (const b of $$('.view-sw [data-v]')) b.setAttribute('aria-checked', b.dataset.v === v);
+  $('#grid').replaceChildren(); renderWall(); refreshPreviews();
+};
+$('.view-sw').addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (b) setView(b.dataset.v); });
+for (const b of $$('.view-sw [data-v]')) b.setAttribute('aria-checked', b.dataset.v === view);
+
+// sidebar: saved machines with live counts; a drawer on phones
+let counts = {}, countsAt = 0;
+async function countMachines() {
+  countsAt = Date.now();
+  await Promise.all(S.machines.map((m, i) => i === S.cur ? null : api('/api/sessions', { m, timeout: 3000 })
+    .then((l) => { counts[m.base] = { n: l.length, run: l.filter((s) => s.windows.some((w) => w.running)).length }; }, () => { counts[m.base] = null; })));
+  renderMachines();
+}
+function renderMachines() {
+  const run = S.sessions.filter((s) => s.windows.some((w) => w.running)).length;
+  const html = S.machines.map((m, i) => {
+    const host = new URL(m.base).host, name = m.name || host, c = i === S.cur ? { n: S.sessions.length, run } : counts[m.base];
+    return `<button class="nav-item mach" data-m="${i}" ${i === S.cur ? 'aria-current="true"' : ''}>
+      <span class="tile ${c === null ? 'st-off' : c?.run ? 'st-run' : 'st-idle'}">${esc(name[0].toUpperCase())}</span>
+      <span class="mt"><b>${esc(name)}</b><small>${c === null ? 'offline' : c ? `${c.n} session${c.n === 1 ? '' : 's'}${c.run ? ` · ${c.run} running` : ''}` : esc(host)}</small></span></button>`;
+  }).join('');
+  if ($('#machines').dataset.sig !== html) { $('#machines').dataset.sig = html; $('#machines').innerHTML = html; } // keep focus steady while polling
+}
+$('#machines').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-m]'); if (!b) return;
+  closeNav();
+  if (+b.dataset.m !== S.cur) { S.cur = +b.dataset.m; saveMachines(); counts = {}; countsAt = 0; start(); }
+});
+let navRelease = null;
+function openNav() {
+  document.body.classList.add('nav-open'); $('#nav-scrim').hidden = false; $('#btn-nav').setAttribute('aria-expanded', 'true');
+  navRelease = onBack(closeNav);
+  ($('#machines [aria-current]') || $('#nav button'))?.focus();
+}
+function closeNav() {
+  if (!document.body.classList.contains('nav-open')) return;
+  document.body.classList.remove('nav-open'); $('#nav-scrim').hidden = true; $('#btn-nav').setAttribute('aria-expanded', 'false');
+  const r = navRelease; navRelease = null; r?.();
+}
+$('#btn-nav').addEventListener('click', openNav);
+$('#nav-scrim').addEventListener('click', closeNav);
+$('#nav').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
+$('#nav').addEventListener('click', (e) => { if (e.target.closest('.nav-item:not(.mach)')) closeNav(); });
+$('#btn-addmachine').addEventListener('click', () => addMachine());
 $('#empty [data-new]').addEventListener('click', () => openNew());
 $('#btn-palette').addEventListener('click', () => openPalette());
 $('#btn-settings').addEventListener('click', () => openSettings());

@@ -410,7 +410,7 @@ function touchScroll(p) {
 
 // ---------- extra keys for touch keyboards ----------
 const KEYS = [
-  ['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z', 0, 'Shift+Tab (Claude: switch mode)'], ['Ctrl', 'ctrl'], ['Alt', 'alt'], 'sep',
+  ['Snippets', 'snip', 0, 'Run a saved command'], 'sep', ['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z', 0, 'Shift+Tab (Claude: switch mode)'], ['Ctrl', 'ctrl'], ['Alt', 'alt'], 'sep',
   ['←', '\x1b[D', 1], ['↓', '\x1b[B', 1], ['↑', '\x1b[A', 1], ['→', '\x1b[C', 1], ['⏎', '\r'], 'sep',
   ['Paste', 'paste'], ['^C', '\x03'], ['^D', '\x04'], ['^Z', '\x1a'], ['^R', '\x12'], ['^L', '\x0c'], ['^B', '\x02', 0, 'tmux prefix'], 'sep',
   ['|', '|'], ['~', '~'], ['/', '/'], ['-', '-'], ['_', '_'], [':', ':'], ['`', '`'], ['Home', '\x1b[H'], ['End', '\x1b[F'], ['PgUp', '\x1b[5~'], ['PgDn', '\x1b[6~'],
@@ -427,6 +427,12 @@ function applyMods(d) {
 }
 export const sendInput = (d) => focused()?.send(d);
 const paste = (t) => sendInput(t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t);
+// snippets: the launcher commands plus what was recently sent from the message box, typed and run in the focused pane
+function snippets(anchor) {
+  const cmds = [...new Set([...S.presets.map((p) => p.cmd).filter(Boolean), ...store.get('sent', [])])].slice(0, 16);
+  if (!cmds.length) return toast('No snippets yet. Commands you send from the message box show up here.');
+  menu(anchor, cmds.map((c) => ({ label: c.length > 48 ? c.slice(0, 46) + '…' : c, icon: 'snippet', run: () => { paste(c); setTimeout(() => sendInput('\r'), 30); } })));
+}
 function renderKeys() {
   $('#keys').innerHTML = KEYS.map((k, i) => k === 'sep' ? '<span class="sep"></span>'
     : `<button type="button" data-k="${i}" ${k[1] === 'ctrl' || k[1] === 'alt' ? `aria-pressed="${T.mods[k[1]]}"` : ''} ${k[3] ? `title="${k[3]}"` : ''}>${esc(k[0])}</button>`).join('');
@@ -440,6 +446,7 @@ function renderKeys() {
     vibrate();
     const [, seq, repeat] = KEYS[b.dataset.k];
     if (seq === 'ctrl' || seq === 'alt') { T.mods[seq] = !T.mods[seq]; return renderKeys(); }
+    if (seq === 'snip') return snippets(b);
     if (seq === 'paste') {
       return navigator.clipboard?.readText ? navigator.clipboard.readText().then(paste, () => toast('Long-press the message box and paste there', true))
         : toast('Long-press the message box and paste there', true);
@@ -454,6 +461,7 @@ function renderKeys() {
 const ct = $('#compose-text');
 function sendCompose() {
   const v = ct.value;
+  if (v.trim() && !v.includes('\n')) store.set('sent', [v.trim(), ...store.get('sent', []).filter((x) => x !== v.trim())].slice(0, 12));
   // multi-line text goes as a bracketed paste so agents treat it as one prompt
   paste(v);
   setTimeout(() => sendInput('\r'), v.includes('\n') ? 60 : 0);
@@ -478,3 +486,5 @@ $('#attach-file').addEventListener('change', async (e) => {
   ct.focus();
 });
 renderKeys();
+
+$('#w-snip').addEventListener('click', (e) => snippets(e.currentTarget));
