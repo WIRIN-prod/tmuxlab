@@ -1,5 +1,5 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
-import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText, icon, presetIcon } from './core.js';
 import { refresh } from './wall.js';
 import { openTerm, setFont, setTheme, T, THEMES } from './term.js';
 import { start } from './main.js';
@@ -19,12 +19,12 @@ export function openNew(mode = 'session', session = null, project = '') {
   const s = session && findSess(session);
   $('#new-cwd').value = s ? activePane(activeWin(s)).cwd : projDir(project);
   $('#browser').hidden = true;
-  const chip = (key, icon, label, sub, cls = '') => `<button type="button" class="preset ${cls}" data-k="${esc(key)}" aria-pressed="${key === nw.pick}">
-    <span class="ic">${esc(icon)}</span><span>${esc(label)}<small>${esc(sub)}</small></span></button>`;
+  const chip = (key, ic, label, sub, cls = '') => `<button type="button" class="preset ${cls}" data-k="${esc(key)}" aria-pressed="${key === nw.pick}">
+    <span class="ic">${icon(ic)}</span><span>${esc(label)}<small>${esc(sub)}</small></span></button>`;
   const stacks = mode === 'session' ? S.stacks : [];
   if (!S.presets.some((p) => 'p:' + p.id === nw.pick) && !stacks.some((x) => 's:' + x.id === nw.pick)) nw.pick = 'p:' + (S.presets[0]?.id || 'shell');
-  $('#new-presets').innerHTML = S.presets.map((p) => chip('p:' + p.id, p.icon || '❯', p.label, p.cmd || 'just a shell')).join('') +
-    stacks.map((x) => chip('s:' + x.id, x.icon || '≡', x.label, `${x.windows.length} windows`, 'stack')).join('');
+  $('#new-presets').innerHTML = S.presets.map((p) => chip('p:' + p.id, presetIcon(p), p.label, p.cmd || 'just a shell')).join('') +
+    stacks.map((x) => chip('s:' + x.id, 'layers', x.label, `${x.windows.length} windows`, 'stack')).join('');
   $('#recent').innerHTML = store.get('recent', []).map((d) => `<button type="button" data-d="${esc(d)}">${esc(home(d))}</button>`).join('');
   $('#wt-row').hidden = true; $('#wt-on').checked = false; $('#wt-branch').hidden = true;
   dNew.showModal();
@@ -225,14 +225,14 @@ function renderPal() {
   const go = (s, w) => pal.pick ? () => pal.pick(s, w) : async () => { if (w != null) await act(`${W(s, w)}/select`); openTerm(s); };
   pal.items = [
     ...S.sessions.flatMap((s) => [
-      ...(pal.pick ? [] : [{ label: s.name, meta: `${S.projects.find((p) => p.id === s.project)?.label ?? ''} ${s.windows.length} windows`.trim(), dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
+      ...(pal.pick ? [] : [{ label: s.name, meta: [S.projects.find((p) => p.id === s.project)?.label, `${s.windows.length} window${s.windows.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '), dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
       ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: whereText(w), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
     ]),
     ...(pal.pick ? [] : [{ label: 'New session…', meta: '', go: () => openNew() }, { label: 'Schedules', meta: '', go: openSchedules }, { label: 'Settings', meta: '', go: openSettings }]),
   ].filter((x) => `${x.label} ${x.meta}`.toLowerCase().includes(q)).slice(0, 60);
   pal.sel = Math.min(pal.sel, Math.max(0, pal.items.length - 1));
   $('#pal-list').innerHTML = pal.items.map((x, i) => `<li role="option" data-i="${i}" aria-selected="${i === pal.sel}">
-    <span class="dot ${x.dot || ''}"></span>${esc(x.label)}<span class="m">${esc(x.meta)}</span></li>`).join('');
+    <span class="dot ${x.dot || ''}"></span><span class="l">${esc(x.label)}</span><span class="m">${esc(x.meta)}</span></li>`).join('');
 }
 $('#pal-q').addEventListener('input', () => { pal.sel = 0; renderPal(); });
 $('#pal-q').addEventListener('keydown', (e) => {

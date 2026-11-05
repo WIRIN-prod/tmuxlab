@@ -222,8 +222,7 @@ export function renderTermBar() {
   $('#w-restart').hidden = !ap.preset;
   $('#w-changes').hidden = !w.branch;
   $('#w-changes').textContent = w.branch ? `⎇ ${w.branch}` : '';
-  $('#w-cmd').textContent = ap.preset ? `$ ${ap.preset}` : '';
-  $('#t-where').innerHTML = whereHtml(w);
+  $('#t-where').innerHTML = whereHtml(w, { branch: false }); // the branch has its own button
   $('#w-panes').textContent = w.panes.length > 1 ? `Panes ${w.panes.length}${w.zoomed ? ' · zoomed' : ''}${w.sync ? ' · synced' : ''}` : 'Panes';
   // tmux panes inside this window
   const pr = $('#t-panes');
@@ -262,12 +261,12 @@ $('#t-tabs').addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const idx = +b.dataset.w, wins = p.sess.windows, pos = wins.findIndex((x) => x.index === idx);
   menu(b, [
-    { label: 'Rename', icon: '✎', run: async () => { const to = await renameWin(wins[pos].name); if (to) { await act(`${W(p.s, idx)}/rename`, { to }); refresh(); } } },
-    { label: 'Move left', icon: '←', disabled: pos === 0, run: async () => { await act(`${W(p.s, idx)}/move`, { to: wins[pos - 1].index }); refresh(); } },
-    { label: 'Move right', icon: '→', disabled: pos === wins.length - 1, run: async () => { await act(`${W(p.s, idx)}/move`, { to: wins[pos + 1].index }); refresh(); } },
-    { label: 'Open beside', icon: '⊞', disabled: T.panes.length >= MAX_PANES, run: () => addPane(p.s, idx) },
+    { label: 'Rename', icon: 'edit', run: async () => { const to = await renameWin(wins[pos].name); if (to) { await act(`${W(p.s, idx)}/rename`, { to }); refresh(); } } },
+    { label: 'Move left', icon: 'left', disabled: pos === 0, run: async () => { await act(`${W(p.s, idx)}/move`, { to: wins[pos - 1].index }); refresh(); } },
+    { label: 'Move right', icon: 'right', disabled: pos === wins.length - 1, run: async () => { await act(`${W(p.s, idx)}/move`, { to: wins[pos + 1].index }); refresh(); } },
+    { label: 'Open beside', icon: 'columns', disabled: T.panes.length >= MAX_PANES, run: () => addPane(p.s, idx) },
     '-',
-    { label: 'Close window', icon: '✕', danger: true, run: async () => { if (await ask({ title: `Close window "${wins[pos].name}"?`, message: 'Whatever runs in it stops.', ok: 'Close window', danger: true })) { await act(W(p.s, idx), null, 'DELETE'); refresh(); } } },
+    { label: 'Close window', icon: 'trash', danger: true, run: async () => { if (await ask({ title: `Close window "${wins[pos].name}"?`, message: 'Whatever runs in it stops.', ok: 'Close window', danger: true })) { await act(W(p.s, idx), null, 'DELETE'); refresh(); } } },
   ]);
 });
 $('#t-panes').addEventListener('click', async (e) => {
@@ -290,7 +289,7 @@ $('#btn-addwin').addEventListener('click', (e) => {
   const p = focused(); if (!p) return;
   menu(e.currentTarget, [...presetItems(async (pr) => {
     await act(`/api/sessions/${encodeURIComponent(p.s)}/windows`, { preset: pr.id }); toast(`Opened ${pr.label}`); refresh();
-  }), '-', { label: 'In another folder…', icon: '…', run: () => openNew('window', p.s) }]);
+  }), '-', { label: 'In another folder…', icon: 'folder', run: () => openNew('window', p.s) }]);
 });
 
 const renameWin = (value) => ask({ title: 'Rename window', label: 'Name', value, ok: 'Rename', validate: (v) => v ? '' : 'Enter a name.' });
@@ -313,14 +312,14 @@ $('#w-panes').addEventListener('click', (e) => {
   const pane = (action) => async () => { await act(`${c.t}/pane`, { action }); refresh(); };
   const split = (dir) => () => menu(e.target, presetItems(async (pr) => { await act(`${c.t}/split`, { dir, preset: pr.id }); refresh(); }));
   menu(e.currentTarget, [
-    { label: 'Split right', icon: '◫', run: split('right') },
-    { label: 'Split down', icon: '⊟', run: split('down') },
-    { label: 'Next pane', icon: '⇥', disabled: c.w.panes.length < 2, run: pane('next') },
-    { label: c.w.zoomed ? 'Unzoom pane' : 'Zoom pane', icon: '⤢', disabled: c.w.panes.length < 2, run: pane('zoom') },
-    { label: 'Change layout', icon: '▦', disabled: c.w.panes.length < 2, run: pane('layout') },
-    { label: 'Type into all panes', checked: c.w.sync, icon: ' ', disabled: c.w.panes.length < 2, run: pane('sync') },
+    { label: 'Split right', icon: 'columns', run: split('right') },
+    { label: 'Split down', icon: 'rows', run: split('down') },
+    { label: 'Next pane', icon: 'next', disabled: c.w.panes.length < 2, run: pane('next') },
+    { label: c.w.zoomed ? 'Unzoom pane' : 'Zoom pane', icon: 'expand', disabled: c.w.panes.length < 2, run: pane('zoom') },
+    { label: 'Change layout', icon: 'grid', disabled: c.w.panes.length < 2, run: pane('layout') },
+    { label: 'Type into all panes', checked: c.w.sync, icon: '', disabled: c.w.panes.length < 2, run: pane('sync') },
     '-',
-    { label: 'Close pane', icon: '✕', danger: true, disabled: c.w.panes.length < 2, run: async () => {
+    { label: 'Close pane', icon: 'trash', danger: true, disabled: c.w.panes.length < 2, run: async () => {
       if (await ask({ title: `Close pane ${c.ap.index}?`, message: `${c.ap.cmd} in this pane stops.`, ok: 'Close pane', danger: true })) { await act(W(c.p.s, `${c.w.index}.${c.ap.index}`), null, 'DELETE'); refresh(); }
     } },
   ]);

@@ -38,10 +38,10 @@ function renderStats() {
   const runs = all.flatMap((s) => s.windows).filter((w) => w.running).length;
   const waiting = all.flatMap((s) => s.windows).filter((w) => w.prompt).length;
   $('#stats').innerHTML = `<span><b>${all.length}</b> sessions</span><span class="r"><b>${runs}</b> running</span>
-    ${waiting ? `<span class="q"><b>${waiting}</b> waiting for you</span>` : ''}
-    ${m ? `<span class="mstat" title="${m.cores} cores, load ${m.load.toFixed(2)}">CPU <b>${m.cpu == null ? '…' : Math.round(m.cpu) + '%'}</b></span>
-    <span class="mstat">RAM <b>${bytes(m.mem.used)}</b> / ${bytes(m.mem.total)}</span>
-    ${m.disk ? `<span class="mstat ${m.disk.used / m.disk.total > 0.9 ? 'warn' : ''}">Disk <b>${Math.round(100 * m.disk.used / m.disk.total)}%</b></span>` : ''}` : ''}`;
+    ${waiting ? `<span class="q"><b>${waiting}</b> waiting</span>` : ''}
+    ${m ? `<span class="machine"><span class="mstat" title="${m.cores} cores, load ${m.load.toFixed(2)}">CPU <b>${m.cpu == null ? '…' : Math.round(m.cpu) + '%'}</b></span>
+    <span class="mstat" title="${bytes(m.mem.used)} of ${bytes(m.mem.total)}">RAM <b>${Math.round(100 * m.mem.used / m.mem.total)}%</b></span>
+    ${m.disk ? `<span class="mstat ${m.disk.used / m.disk.total > 0.9 ? 'warn' : ''}">Disk <b>${Math.round(100 * m.disk.used / m.disk.total)}%</b></span>` : ''}</span>` : ''}`;
 }
 
 export async function refreshPreviews() {
@@ -106,7 +106,7 @@ function headerFor(p, sessions) {
   h.classList.toggle('none', !p.id);
   h.innerHTML = `<button class="pt" data-ptoggle aria-expanded="${open}">${icon('down', 'ico chev')}${p.id ? FOLDER : ''}<b>${esc(p.label)}</b>
       <span class="pc">${sessions.length ? `${sessions.length} session${sessions.length > 1 ? 's' : ''}` : 'empty'}${runs ? ` · <i class="r">${runs} running</i>` : ''}${asks ? ` · <i class="q">${asks} waiting</i>` : ''}</span></button>
-    ${p.cwd ? `<span class="pd">${esc(home(p.cwd))}</span>` : ''}<span class="spacer"></span>
+    ${p.cwd ? `<span class="pd" title="${esc(home(p.cwd))}"><bdi>${esc(home(p.cwd))}</bdi></span>` : ''}<span class="spacer"></span>
     <button class="btn sm ghost" data-pnew title="New session in ${esc(p.label)}" aria-label="New session in ${esc(p.label)}">${icon('plus')}<span class="lbl">Session</span></button>
     ${p.id ? `<button class="btn sm ghost icon" data-pmore aria-haspopup="menu" aria-label="Project actions for ${esc(p.label)}">${icon('more')}</button>` : ''}`;
   return h;
@@ -136,14 +136,14 @@ function cardFor(s) {
   card.dataset.sig = sig;
   const st = S.stats?.sessions[s.name];
   $('.card-h', card).innerHTML = `<span class="dot ${hasRun ? 'run' : ''}"></span><h3>${esc(s.name)}</h3>
-    ${aw.branch ? `<span class="branch" title="git branch">⎇ ${esc(aw.branch)}</span>` : ''}
     <span class="when">${s.attached ? `<span class="att">${s.attached} viewing</span> · ` : ''}${ago(s.activity)}</span>`;
+  $('.wins', card).hidden = s.windows.length < 2; // one window: the where-line already says what runs
   $('.wins', card).innerHTML = s.windows.map((w) => `<button class="win ${w.active ? 'active' : ''}" data-w="${w.index}" title="${esc(w.cmd)}">
-    <span class="dot ${w.prompt ? 'ask-dot' : winState(w)}"></span>${esc(w.name)}${w.panes.length > 1 ? `<span class="c">${w.panes.length} panes</span>` : w.running ? `<span class="c">${esc(w.cmd)}</span>` : ''}</button>`).join('');
+    <span class="dot ${w.prompt ? 'ask-dot' : winState(w)}"></span>${esc(w.name)}${w.panes.length > 1 ? `<span class="c">${w.panes.length} panes</span>` : w.running && w.cmd !== w.name ? `<span class="c">${esc(w.cmd)}</span>` : ''}</button>`).join('');
   $('.asks', card).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
   $('.where', card).innerHTML = whereHtml(aw);
   $('.card-f', card).innerHTML = `<button class="btn sm primary" data-a="open">Open</button>
-    ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}">Stop ${esc(rp.cmd)}</button>`
+    ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}" aria-label="Stop ${esc(rp.cmd)}">Stop</button>`
       : aw.preset ? `<button class="btn sm run" data-a="start" title="${esc(aw.preset)}">Start ${esc(aw.preset.split(' ')[0])}</button>` : ''}
     <span class="use">${st ? `${Math.round(st.cpu)}% CPU · ${bytes(st.rss)}` : ''}</span>
     <button class="btn sm ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">${icon('more')}</button>`;
@@ -166,17 +166,17 @@ $('#grid').addEventListener('click', async (e) => {
   else if (a === 'stop') { const b = e.target.closest('[data-a]'); await act(`${W(s.name, b.dataset.t)}/stop`); toast(`Sent ${b.textContent.toLowerCase()}`); setTimeout(refresh, 600); }
   else if (a === 'start') { await act(`${W(s.name, aw.index)}/start`); toast(`Started ${aw.preset}`); setTimeout(refresh, 600); }
   else if (a === 'more') menu(e.target.closest('button'), [
-    { label: 'New window', icon: '+', run: () => menu(e.target.closest('button'), presetItems(async (p) => {
+    { label: 'New window', icon: 'plus', run: () => menu(e.target.closest('button'), presetItems(async (p) => {
       await act(`/api/sessions/${encodeURIComponent(s.name)}/windows`, { preset: p.id }); toast(`Opened ${p.label}`); refresh();
     })) },
-    ...(aw.branch ? [{ label: 'Changes', icon: '±', run: () => openChanges(activePane(aw).cwd) }] : []),
-    { label: 'Move to project', icon: '▤', run: () => menu(e.target.closest('button'), moveItems([s.name], projectOf(s))) },
-    { label: 'Rename', icon: '✎', run: async () => {
+    ...(aw.branch ? [{ label: 'Changes', icon: 'diff', run: () => openChanges(activePane(aw).cwd) }] : []),
+    { label: 'Move to project', icon: 'folder', run: () => menu(e.target.closest('button'), moveItems([s.name], projectOf(s))) },
+    { label: 'Rename', icon: 'edit', run: async () => {
       const to = await ask({ title: 'Rename session', label: 'Name', value: s.name, ok: 'Rename', validate: NAME_RULE });
       if (to && to !== s.name) { await act(`/api/sessions/${encodeURIComponent(s.name)}/rename`, { to }); refresh(); }
     } },
     '-',
-    { label: 'End session', icon: '✕', danger: true, run: async () => {
+    { label: 'End session', icon: 'trash', danger: true, run: async () => {
       if (!await ask({ title: `End session "${s.name}"?`, message: 'Everything running in it stops. This can\'t be undone.', ok: 'End session', danger: true })) return;
       await act(`/api/sessions/${encodeURIComponent(s.name)}`, null, 'DELETE'); toast(`Ended ${s.name}`); refresh();
     } },
@@ -190,10 +190,10 @@ async function moveTo(names, project) {
   refresh();
 }
 const moveItems = (names, cur) => [
-  ...S.projects.map((p) => ({ label: p.label, icon: '▤', checked: p.id === cur, run: () => moveTo(names, p.id) })),
-  { label: 'No project', icon: ' ', checked: !cur, run: () => moveTo(names, '') },
+  ...S.projects.map((p) => ({ label: p.label, icon: 'folder', checked: p.id === cur, run: () => moveTo(names, p.id) })),
+  { label: 'No project', icon: '', checked: !cur, run: () => moveTo(names, '') },
   '-',
-  { label: 'New project…', icon: '+', run: async () => { const p = await newProject(); if (p) moveTo(names, p.id); } },
+  { label: 'New project…', icon: 'plus', run: async () => { const p = await newProject(); if (p) moveTo(names, p.id); } },
 ];
 
 export async function saveProjects(list) {
@@ -224,17 +224,17 @@ function projectAction(e, id) {
   const edit = (patch) => saveProjects(S.projects.map((x) => x.id === id ? { ...x, ...patch } : x));
   const i = S.projects.indexOf(p);
   menu(e.target.closest('button'), [
-    { label: 'Rename', icon: '✎', run: async () => {
+    { label: 'Rename', icon: 'edit', run: async () => {
       const l = await ask({ title: 'Rename project', label: 'Name', value: p.label, ok: 'Rename', validate: (v) => !v ? 'Enter a name.' : v.length > 40 ? 'Keep it under 40 characters.' : '' });
       if (l) edit({ label: l }); } },
-    { label: 'Default folder', icon: '…', sub: p.cwd ? home(p.cwd) : 'none', run: async () => {
+    { label: 'Default folder', icon: 'folder', sub: p.cwd ? home(p.cwd) : 'none', run: async () => {
       const c = await ask({ title: 'Default folder', label: 'Folder', value: p.cwd || '', placeholder: '~/code/app', ok: 'Save', help: 'Leave empty for none.' }); if (c == null) return;
       const { cwd, ...rest } = p; saveProjects(S.projects.map((x) => x.id === id ? { ...rest, ...(c.trim() ? { cwd: c.trim() } : {}) } : x));
     } },
-    { label: 'Move up', icon: '↑', disabled: i === 0, run: () => { const l = [...S.projects]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; saveProjects(l); } },
-    { label: 'Move down', icon: '↓', disabled: i === S.projects.length - 1, run: () => { const l = [...S.projects]; [l[i + 1], l[i]] = [l[i], l[i + 1]]; saveProjects(l); } },
+    { label: 'Move up', icon: 'up', disabled: i === 0, run: () => { const l = [...S.projects]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; saveProjects(l); } },
+    { label: 'Move down', icon: 'down', disabled: i === S.projects.length - 1, run: () => { const l = [...S.projects]; [l[i + 1], l[i]] = [l[i], l[i + 1]]; saveProjects(l); } },
     '-',
-    { label: 'Delete project', icon: '✕', danger: true, run: async () => {
+    { label: 'Delete project', icon: 'trash', danger: true, run: async () => {
       const inside = S.sessions.filter((s) => s.project === id);
       if (!await ask({ title: `Delete project "${p.label}"?`, message: inside.length ? `Its ${inside.length} session${inside.length > 1 ? 's keep' : ' keeps'} running under No project.` : 'It has no sessions.', ok: 'Delete project', danger: true })) return;
       for (const s of inside) await act(`/api/sessions/${encodeURIComponent(s.name)}/project`, { project: '' }).catch(() => {});
@@ -285,12 +285,12 @@ $('#machine').addEventListener('click', async (e) => {
     ...S.machines.map((m, i) => ({ label: m.name || new URL(m.base).host, sub: `${new URL(m.base).host} · ${counts[i]}`, checked: i === S.cur,
       run: () => { S.cur = i; saveMachines(); start(); } })),
     '-',
-    { label: 'Add machine', icon: '+', run: () => addMachine() },
-    { label: 'Rename this machine', icon: '✎', run: async () => {
+    { label: 'Add machine', icon: 'plus', run: () => addMachine() },
+    { label: 'Rename this machine', icon: 'edit', run: async () => {
       const n = await ask({ title: 'Rename this machine', label: 'Name on this device', value: cfg().name || S.info?.host || '', ok: 'Rename' }); if (n == null) return;
       cfg().name = n; saveMachines(); renderWall();
     } },
-    { label: 'Remove this machine', icon: '✕', danger: true, run: async () => {
+    { label: 'Remove this machine', icon: 'trash', danger: true, run: async () => {
       if (!await ask({ title: `Remove ${cfg().name || new URL(cfg().base).host}?`, message: 'This device forgets the address and token. Sessions on the machine keep running.', ok: 'Remove', danger: true })) return;
       S.machines.splice(S.cur, 1); S.cur = 0; saveMachines(); start();
     } },

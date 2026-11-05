@@ -75,15 +75,19 @@ export const findSess = (n) => S.sessions.find((s) => s.name === n);
 export const activePane = (w) => w.panes?.find((p) => p.active) || w.panes?.[0] || w;
 // what a window is doing and where: the agent (or the running program), the repo, the worktree and the folder.
 // Read from the pane that runs something, since that's the one you care about.
-export const placeOf = (w) => { const p = w.panes?.find((x) => x.running) || activePane(w); return { cmd: p.running ? p.cmd : '', repo: p.repo, wt: p.wt, cwd: home(p.cwd) }; };
-export function whereHtml(w) {
+export const placeOf = (w) => { const p = w.panes?.find((x) => x.running) || activePane(w); return { cmd: p.running ? p.cmd : '', repo: p.repo, branch: p.branch, wt: p.wt, cwd: home(p.cwd) }; };
+export function whereHtml(w, { branch = true } = {}) {
   const x = placeOf(w);
   return `${x.cmd ? `<b class="agent">${esc(x.cmd)}</b>` : '<span>shell</span>'}`
     + (x.repo ? `<span class="repo" title="git repository">${esc(x.repo)}</span>` : '')
-    + (x.wt ? `<span class="wt" title="git worktree">worktree ${esc(x.wt)}</span>` : '')
+    + (branch && x.branch ? `<span class="br" title="git branch">${icon('branch')}${esc(x.branch)}</span>` : '')
+    + (x.wt ? `<span class="wt" title="git worktree ${esc(x.wt)}">${x.wt === x.branch ? 'worktree' : `worktree ${esc(x.wt)}`}</span>` : '')
     + `<span class="cwd" title="${esc(x.cwd)}"><bdi>${esc(x.cwd)}</bdi></span>`;
 }
 export const whereText = (w) => { const x = placeOf(w); return [x.cmd, x.repo, x.wt && `worktree ${x.wt}`, x.cwd].filter(Boolean).join(' · '); };
+// launcher icons follow what the launcher runs, so they stay consistent whatever glyph the config holds
+export const presetIcon = (p) => { const c = p.cmd || ''; return p.windows ? 'layers' : !c ? 'terminal' : /--continue|--resume/.test(c) ? 'refresh'
+  : /^claude/.test(c) ? 'spark' : /^codex/.test(c) ? 'target' : /test/.test(c) ? 'check' : /dev|serve|start/.test(c) ? 'play' : 'terminal'; };
 export const vibrate = () => { if (touch) navigator.vibrate?.(6); };
 
 // Android Back / browser back closes the top overlay first. Each open overlay owns one history entry.
@@ -134,7 +138,7 @@ export function menu(anchor, items) {
   const m = document.createElement('div');
   m.className = 'menu'; m.setAttribute('role', 'menu');
   m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : `<button role="${it.checked !== undefined ? 'menuitemradio' : 'menuitem'}" data-i="${i}" class="${it.danger ? 'danger' : ''}" ${it.disabled ? 'disabled' : ''} ${it.checked !== undefined ? `aria-checked="${!!it.checked}"` : ''}>
-    <span class="mi" aria-hidden="true">${esc(it.checked ? '✓' : it.icon || '')}</span><span>${esc(it.label)}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('');
+    <span class="mi" aria-hidden="true">${it.checked ? icon('check') : it.icon ? icon(it.icon) : ''}</span><span>${esc(it.label)}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('');
   document.body.append(m);
   const r = anchor.getBoundingClientRect();
   m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + 'px';
@@ -202,7 +206,7 @@ export async function busy(btn, fn) {
   try { return await fn(); } finally { btn?.removeAttribute('aria-busy'); }
 }
 
-export const presetItems = (pick) => S.presets.map((p) => ({ label: p.label, icon: p.icon || '❯', sub: p.cmd || 'shell', run: () => pick(p) }));
+export const presetItems = (pick) => S.presets.map((p) => ({ label: p.label, icon: presetIcon(p), sub: p.cmd || 'shell', run: () => pick(p) }));
 
 // close buttons in every dialog
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-close]'); if (b) b.closest('dialog').close(); });
