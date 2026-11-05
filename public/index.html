@@ -18,29 +18,34 @@
 <section id="login" class="view" hidden>
   <form id="login-form" class="login-card">
     <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg>
-    <h1>Connect to a machine</h1>
+    <h1 id="login-title">Connect to a machine</h1>
     <p>Paste the link the server printed when it started, or enter the address and token.</p>
     <label>Link or server address<input id="login-url" placeholder="192.168.x.x:7681 or the full link" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
     <label>Token<input id="login-token" type="password" placeholder="From ~/.config/tmuxlab/token" autocomplete="off"></label>
     <p id="login-err" class="err" role="alert"></p>
     <button class="btn primary">Connect</button>
+    <div class="saved" id="login-saved" hidden></div>
   </form>
 </section>
 
 <!-- wall of sessions -->
 <section id="wall" class="view" hidden>
   <header class="topbar">
-    <div class="brand"><svg class="mark sm" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg><span id="host">tmuxlab</span></div>
+    <button class="brand" id="machine" aria-haspopup="menu" title="Switch machine">
+      <svg class="mark sm" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg>
+      <span id="machine-name">tmuxlab</span><span class="caret">▾</span></button>
     <div class="stats" id="stats" aria-live="polite"></div>
     <div class="actions">
       <button class="btn ghost icon" id="btn-palette" title="Jump to (Ctrl+K)" aria-label="Jump to session">⌕</button>
+      <button class="btn ghost icon" id="btn-sched" title="Schedules" aria-label="Schedules">◷</button>
       <button class="btn ghost icon" id="btn-settings" title="Settings" aria-label="Settings">⚙</button>
-      <button class="btn primary" id="btn-new">New session</button>
+      <button class="btn primary" id="btn-new" aria-label="New session"><span aria-hidden="true" class="plus">+</span><span class="lbl">New session</span></button>
     </div>
   </header>
   <div class="filters" id="filters" role="tablist">
     <button role="tab" data-f="all" aria-selected="true">All</button>
     <button role="tab" data-f="running">Running</button>
+    <button role="tab" data-f="waiting">Needs you</button>
     <button role="tab" data-f="idle">Idle</button>
   </div>
   <main id="grid" class="grid"></main>
@@ -57,7 +62,8 @@
     <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions">‹</button>
     <button class="sname" id="t-name" title="Rename session"></button>
     <nav class="tabs" id="t-tabs" aria-label="Windows"></nav>
-    <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window (right-click: pick folder)">+</button>
+    <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window">+</button>
+    <button class="btn ghost icon" id="btn-split" aria-label="Show another window beside this one" title="Split view">⊞</button>
     <span class="conn" id="t-conn" title="Connection"></span>
   </header>
   <div class="wbar" id="t-wbar">
@@ -65,14 +71,21 @@
     <button class="btn sm ghost" id="w-restart" title="Interrupt and rerun">Restart</button>
     <span class="wcmd" id="w-cmd"></span>
     <span class="spacer"></span>
+    <button class="btn sm ghost branch" id="w-changes" title="Changes, commit and pull request" hidden></button>
+    <button class="btn sm ghost" id="w-panes" aria-haspopup="menu">Panes</button>
+    <button class="btn sm ghost" id="w-find" title="Search and copy output">Find</button>
     <button class="btn sm ghost" id="w-scroll" title="Scroll back (tmux copy mode)">History</button>
     <button class="btn sm ghost icon" id="w-font-dec" aria-label="Smaller text">A−</button>
     <button class="btn sm ghost icon" id="w-font-inc" aria-label="Larger text">A+</button>
     <button class="btn sm ghost danger" id="w-kill">Close window</button>
   </div>
-  <div class="termwrap"><div id="xterm"></div><div class="scrollhint" id="scrollhint" hidden>History · swipe down to return<button class="btn sm" id="scroll-exit">Exit</button></div></div>
+  <div class="pchips" id="t-panes" hidden></div>
+  <div class="ask bar" id="t-ask" hidden></div>
+  <div class="terms" id="terms" data-n="1"></div>
   <div class="keys" id="keys" role="toolbar" aria-label="Extra keys"></div>
   <form class="compose" id="compose">
+    <button type="button" class="btn ghost icon" id="attach" aria-label="Attach a file or photo" title="Attach a file or photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/></svg></button>
+    <input type="file" id="attach-file" multiple hidden>
     <textarea id="compose-text" rows="1" placeholder="Type or paste, Enter to send" autocapitalize="off" spellcheck="false" aria-label="Send text to terminal"></textarea>
     <button class="btn primary" aria-label="Send">Send</button>
   </form>
@@ -92,27 +105,118 @@
     </label>
     <div class="browser" id="browser" hidden></div>
     <div class="recent" id="recent"></div>
+    <div class="wt" id="wt-row" hidden>
+      <label class="check"><input type="checkbox" id="wt-on"> Work on a new branch in its own folder <span class="muted">(git worktree, so agents don't collide)</span></label>
+      <input id="wt-branch" hidden autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Branch name">
+    </div>
     <div class="row end">
-      <button type="button" class="btn ghost" value="cancel" data-close>Cancel</button>
-      <button class="btn primary" id="new-go" value="ok">Start</button>
+      <button type="button" class="btn ghost" data-close>Cancel</button>
+      <button class="btn primary" id="new-go" value="ok">Start session</button>
     </div>
   </form>
 </dialog>
 
+<!-- changes -->
+<dialog id="dlg-changes" class="sheet wide">
+  <div class="sheet-in">
+    <div class="row"><h2 id="ch-title">Changes</h2><span class="spacer"></span><button class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <p class="muted mono" id="ch-sub"></p>
+    <div class="ch-body" id="ch-body"></div>
+    <textarea id="ch-msg" rows="2" placeholder="Commit message" spellcheck="true" aria-label="Commit message"></textarea>
+    <div class="row wrap">
+      <button class="btn ghost danger" id="ch-wt" hidden>Remove worktree</button>
+      <span class="spacer"></span>
+      <button class="btn" id="ch-push">Push</button>
+      <button class="btn" id="ch-pr">Create pull request</button>
+      <button class="btn primary" id="ch-commit">Commit all</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- find & copy -->
+<dialog id="dlg-find" class="sheet wide find">
+  <div class="sheet-in">
+    <div class="row"><h2 id="find-title"></h2><span class="spacer"></span><button class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="row">
+      <input id="find-q" placeholder="Find in output" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Find in output">
+      <span class="muted nowrap" id="find-n"></span>
+      <button class="btn sm ghost" id="find-prev" aria-label="Previous match">↑</button>
+      <button class="btn sm ghost" id="find-next" aria-label="Next match">↓</button>
+      <button class="btn sm" id="find-copy">Copy</button>
+    </div>
+    <pre id="find-pre" class="find-pre"></pre>
+  </div>
+</dialog>
+
+<!-- schedules -->
+<dialog id="dlg-sched" class="sheet wide">
+  <div class="sheet-in">
+    <div class="row"><h2>Schedules</h2><span class="spacer"></span><button class="btn sm primary" id="sch-add">Add schedule</button><button class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <ul class="sch-list" id="sch-list"></ul>
+    <div class="sch-form" id="sch-form" hidden>
+      <label>Name<input id="sf-label" placeholder="Nightly tests" autocomplete="off"></label>
+      <div class="grid2">
+        <label>When<select id="sf-kind">
+          <option value="hourly">Every hour</option><option value="daily">Every day at</option><option value="weekdays">Weekdays at</option>
+          <option value="weekly">Every Monday at</option><option value="custom">Custom (cron)</option></select></label>
+        <label>Time<input type="time" id="sf-time"><input id="sf-cron" placeholder="*/30 * * * *" spellcheck="false" aria-label="Cron expression"></label>
+      </div>
+      <div class="grid2">
+        <label>Run<select id="sf-what"></select></label>
+        <label>In session<input id="sf-session" placeholder="scheduled" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      </div>
+      <input id="sf-cmd" placeholder="npm test" spellcheck="false" aria-label="Command">
+      <label>Folder<input id="sf-cwd" placeholder="~" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <div class="row">
+        <button class="btn ghost danger" id="sf-del">Delete</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="sf-cancel">Cancel</button>
+        <button class="btn primary" id="sf-save">Save schedule</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
 <!-- settings -->
-<dialog id="dlg-settings" class="sheet">
+<dialog id="dlg-settings" class="sheet wide">
   <form method="dialog" id="settings-form">
-    <h2>Settings</h2>
-    <p class="muted" id="set-server"></p>
-    <label>Launchers <span class="muted">(JSON: id, label, cmd, icon)</span>
-      <textarea id="set-presets" rows="12" spellcheck="false"></textarea>
-    </label>
+    <div class="row"><h2>Settings</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <p class="muted mono" id="set-server"></p>
+    <div class="seg" id="set-tabs" role="tablist">
+      <button type="button" role="tab" data-tab="alerts">Phone alerts</button>
+      <button type="button" role="tab" data-tab="launchers">Launchers</button>
+      <button type="button" role="tab" data-tab="stacks">Stacks</button>
+      <button type="button" role="tab" data-tab="look">Appearance</button>
+    </div>
+    <div data-pane="alerts" class="pane">
+      <p class="muted">Alerts go through <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>. Install the ntfy app, subscribe to your topic, and the server pushes to your phone even when tmuxlab is closed. Anyone who knows a topic name can read it, so keep the random one.</p>
+      <label>Topic URL<div class="pathrow"><input id="al-url" placeholder="https://ntfy.sh/your-topic" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn sm" id="al-gen">New topic</button></div></label>
+      <a id="al-sub" class="muted small" target="_blank" rel="noopener" hidden>Open topic to subscribe</a>
+      <label class="check"><input type="checkbox" id="al-prompts"> An agent asks a question</label>
+      <label class="check"><input type="checkbox" id="al-quiet"> An agent goes quiet after working for <input type="number" id="al-secs" min="5" max="3600" class="num-in" aria-label="seconds"> s</label>
+      <label class="check"><input type="checkbox" id="al-finished"> A launched command finishes</label>
+      <label>Programs that count as agents<input id="al-agents" spellcheck="false" autocapitalize="off"></label>
+      <div><button type="button" class="btn sm" id="al-test">Send test alert</button></div>
+    </div>
+    <div data-pane="launchers" class="pane" hidden>
+      <label>Launchers <span class="muted">(JSON: id, label, cmd, icon)</span><textarea id="set-presets" rows="14" spellcheck="false"></textarea></label>
+    </div>
+    <div data-pane="stacks" class="pane" hidden>
+      <label>Stacks <span class="muted">(JSON: id, label, icon, windows: [{preset or cmd, label, split: right|down}])</span><textarea id="set-stacks" rows="14" spellcheck="false"></textarea></label>
+    </div>
+    <div data-pane="look" class="pane" hidden>
+      <div class="grid2">
+        <label>Terminal theme<select id="set-theme"></select></label>
+        <label>Text size<input type="number" id="set-font" min="8" max="28"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="set-awake"> Keep the screen on while a terminal is open</label>
+    </div>
     <p id="set-err" class="err" role="alert"></p>
     <div class="row">
-      <button type="button" class="btn ghost danger" id="set-logout">Disconnect</button>
+      <button type="button" class="btn ghost danger" id="set-logout">Forget this machine</button>
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Cancel</button>
-      <button type="button" class="btn primary" id="set-save">Save launchers</button>
+      <button type="button" class="btn primary" id="set-save">Save settings</button>
     </div>
   </form>
 </dialog>
@@ -128,6 +232,6 @@
 <script src="vendor/xterm.js"></script>
 <script src="vendor/addon-fit.js"></script>
 <script src="vendor/addon-web-links.js"></script>
-<script src="app.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

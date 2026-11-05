@@ -1,127 +1,113 @@
-// tmuxlab: web/PWA control plane for tmux sessions (shells, claude, codex, CI).
+// tmuxlab: web/Android control plane for tmux sessions (shells, claude, codex, CI).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
+import { CONF, httpErr, sleep, resolveCwd, loadConf, saveConf, NAME_RE } from './lib/util.js';
+import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, storedCmd, interrupt, killViews, detectPrompt, VIEW_RE } from './lib/tmux.js';
+import * as G from './lib/git.js';
+import { stats } from './lib/stats.js';
+import { parseCron, nextRun } from './lib/cron.js';
+import { startWatcher, prompts, lastRuns, notify } from './lib/watch.js';
 
-const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const CONF = process.env.TMUXLAB_HOME || path.join(os.homedir(), '.config', 'tmuxlab');
 const PORT = +(process.env.PORT || 7681);
 const HOST = process.env.HOST || '0.0.0.0';
-const TMUX = process.env.TMUXLAB_TMUX || 'tmux';
-const SOCK = process.env.TMUXLAB_SOCKET ? ['-L', process.env.TMUXLAB_SOCKET] : []; // separate tmux server, e.g. for tests
-const SHELLS = new Set(['bash', 'zsh', 'sh', 'fish', 'dash', 'ksh', 'tcsh', 'login', 'tmux']);
-const NAME_RE = /^[\w.-]{1,64}$/;
-
-fs.mkdirSync(CONF, { recursive: true, mode: 0o700 });
 
 // --- auth: one shared secret, generated on first run ---
 const tokenFile = path.join(CONF, 'token');
 const TOKEN = process.env.TMUXLAB_TOKEN || (fs.existsSync(tokenFile)
   ? fs.readFileSync(tokenFile, 'utf8').trim()
   : (() => { const t = crypto.randomBytes(24).toString('base64url'); fs.writeFileSync(tokenFile, t, { mode: 0o600 }); return t; })());
-const authed = (t) => typeof t === 'string' && t.length === TOKEN.length &&
-  crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
+const authed = (t) => typeof t === 'string' && t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
 
-// --- presets: launchers shown in the UI, editable from the UI ---
-const presetFile = path.join(CONF, 'presets.json');
-const DEFAULT_PRESETS = [
-  { id: 'shell', label: 'Shell', cmd: '', icon: '❯' },
-  { id: 'claude', label: 'Claude', cmd: 'claude', icon: '✳' },
-  { id: 'claude-resume', label: 'Claude (continue)', cmd: 'claude --continue', icon: '↻' },
-  { id: 'codex', label: 'Codex', cmd: 'codex', icon: '◎' },
-  { id: 'ci', label: 'Tests', cmd: 'npm test', icon: '✓' },
-  { id: 'dev', label: 'Dev server', cmd: 'npm run dev', icon: '▲' },
-];
-const loadPresets = () => {
-  try { return JSON.parse(fs.readFileSync(presetFile, 'utf8')); } catch { return DEFAULT_PRESETS; }
-};
-const validPresets = (p) => Array.isArray(p) && p.length <= 100 && p.every((x) =>
-  x && typeof x.id === 'string' && NAME_RE.test(x.id) && typeof x.label === 'string' &&
-  x.label.length <= 40 && typeof x.cmd === 'string' && x.cmd.length <= 2000 &&
-  (x.icon === undefined || (typeof x.icon === 'string' && x.icon.length <= 4)));
-
-// --- tmux helpers (execFile, never a shell) ---
-const tmux = async (...args) => (await run(TMUX, [...SOCK, ...args], { maxBuffer: 8 << 20 })).stdout;
-const sess = (n) => { if (!NAME_RE.test(n)) throw httpErr(400, 'bad session name'); return n; };
-const win = (s, i) => { if (!/^\d{1,4}$/.test(String(i))) throw httpErr(400, 'bad window'); return `=${sess(s)}:${i}`; };
-const httpErr = (code, msg) => Object.assign(new Error(msg), { code });
-
-const FMT = ['session_name', 'session_attached', 'session_created', 'session_activity', 'window_index',
-  'window_name', 'window_active', 'pane_current_command', 'pane_current_path', 'pane_dead',
-  'window_activity', '@tl_cmd', 'pane_pid', 'window_panes', 'pane_in_mode'].map((f) => `#{${f}}`).join('\t');
-
+// --- sessions, windows, panes ---
 async function listSessions() {
-  let out;
-  try { out = await tmux('list-windows', '-a', '-F', FMT); } catch (e) {
-    if (/no server running|error connecting/i.test(e.stderr || '')) return [];
-    throw e;
-  }
-  const map = new Map();
-  for (const line of out.split('\n').filter(Boolean)) {
-    const [name, attached, created, activity, index, wname, active, cmd, cwd, dead, wact, tlcmd, pid, panes, inMode] = line.split('\t');
-    if (!map.has(name)) map.set(name, { name, attached: +attached, created: +created, activity: +activity, windows: [] });
-    map.get(name).windows.push({
-      index: +index, name: wname, active: active === '1', cmd, cwd, dead: dead === '1',
-      activity: +wact, preset: tlcmd || '', running: !SHELLS.has(cmd) && dead !== '1', pid: +pid, panes: +panes, inMode: inMode === '1',
-    });
-  }
-  return [...map.values()].sort((a, b) => b.activity - a.activity);
+  const rows = await listPanes();
+  const cwds = [...new Set(rows.filter((r) => r.pane_active === '1').map((r) => r.pane_current_path))];
+  const branches = new Map(await Promise.all(cwds.map(async (c) => [c, await G.branchOf(c)])));
+  return shape(rows, (r) => ({ prompt: prompts.get(r.pane_id) || null, branch: branches.get(r.pane_current_path) || '' })).list;
 }
 
-const resolveCwd = (p) => {
-  const d = !p ? os.homedir() : p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
-  if (!path.isAbsolute(d) || !fs.statSync(d, { throwIfNoEntry: false })?.isDirectory()) throw httpErr(400, `not a directory: ${p}`);
-  return d;
-};
+const presetOf = (id) => loadConf('presets').find((p) => p.id === id);
+const stepCmd = (st) => st.cmd ?? presetOf(st.preset)?.cmd ?? '';
+const stepLabel = (st) => st.label || presetOf(st.preset)?.label;
 
-async function startCmd(target, cmd) {
-  await tmux('set-option', '-w', '-t', target, '@tl_cmd', cmd);
-  if (cmd) await tmux('send-keys', '-t', target, '-l', cmd), await tmux('send-keys', '-t', target, 'Enter');
+// one window (or split pane) of a session, running a launcher or command
+async function addStep(name, cwd, st, splitOf) {
+  const label = stepLabel(st);
+  let where;
+  if (st.split && splitOf !== undefined) {
+    where = (await tmux('split-window', st.split === 'down' ? '-v' : '-h', '-P', '-F', '#{window_index}.#{pane_index}',
+      '-t', tgt(name, splitOf), '-c', cwd || '#{pane_current_path}')).trim();
+  } else {
+    where = (await tmux('new-window', '-P', '-F', '#{window_index}', '-t', `=${sess(name)}:`,
+      ...(cwd ? ['-c', cwd] : []), ...(label ? ['-n', label] : []))).trim();
+  }
+  await startCmd(tgt(name, where), stepCmd(st));
+  return where;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const presetCmd = (b) => b.cmd ?? loadPresets().find((p) => p.id === b.preset)?.cmd ?? '';
-const presetLabel = (b) => b.label || loadPresets().find((p) => p.id === b.preset)?.label;
+async function createSession({ name, cwd, stack, worktree, ...st }) {
+  name = sess(name || `s${Date.now().toString(36).slice(-5)}`);
+  if (VIEW_RE.test(name)) throw httpErr(400, 'bad session name');
+  let dir = resolveCwd(cwd);
+  if (worktree?.branch) dir = await G.addWorktree(dir, worktree.branch);
+  const steps = stack ? loadConf('stacks').find((s) => s.id === stack)?.windows : [st];
+  if (!steps) throw httpErr(400, `no stack ${stack}`);
+  const label = stepLabel(steps[0]);
+  await tmux('new-session', '-d', '-s', name, '-c', dir, '-x', '200', '-y', '50', ...(label ? ['-n', label] : []));
+  const first = (await tmux('display-message', '-p', '-t', `=${name}:`, '#{window_index}')).trim();
+  await startCmd(tgt(name, first), stepCmd(steps[0]));
+  let last = first;
+  for (const s of steps.slice(1)) last = (await addStep(name, dir, s, last.split('.')[0])).split('.')[0];
+  if (steps.length > 1) await tmux('select-window', '-t', tgt(name, first));
+  return { name, window: +first, cwd: dir };
+}
+
+async function runSchedule(s) {
+  const name = s.session || 'scheduled';
+  const label = `${s.label.slice(0, 20)} ${new Date().toTimeString().slice(0, 5)}`;
+  const exists = await tmux('has-session', '-t', `=${name}`).then(() => true, () => false);
+  if (!exists) await createSession({ name, cwd: s.cwd, preset: s.preset, cmd: s.cmd, label });
+  else await addStep(name, s.cwd ? resolveCwd(s.cwd) : undefined, { preset: s.preset, cmd: s.cmd, label });
+  lastRuns[s.id] = new Date().toISOString();
+  notify(`Scheduled: ${s.label}`, `started in session ${name}`, { tags: 'alarm_clock' }).catch(() => {});
+}
 
 // --- REST API ---
+const W = '/api/windows/([^/]+)/(\\d+(?:\\.\\d+)?)';
+const r = (s) => new RegExp(`^${s}$`);
 const routes = [
-  ['GET', /^\/api\/sessions$/, async () => listSessions()],
-  ['POST', /^\/api\/sessions$/, async (_, b) => {
-    const name = sess(b.name || `s${Date.now().toString(36).slice(-5)}`);
-    const cwd = resolveCwd(b.cwd);
-    const label = presetLabel(b);
-    await tmux('new-session', '-d', '-s', name, '-c', cwd, '-x', '200', '-y', '50', ...(label ? ['-n', label] : []));
-    const idx = (await tmux('display-message', '-p', '-t', `=${name}:`, '#{window_index}')).trim();
-    await startCmd(win(name, idx), presetCmd(b));
-    return { name, window: +idx };
+  ['GET', r('/api/sessions'), () => listSessions()],
+  ['POST', r('/api/sessions'), (_, b) => createSession(b)],
+  ['DELETE', r('/api/sessions/([^/]+)'), async ([s]) => { await killViews(sess(s)); await tmux('kill-session', '-t', `=${s}`); return {}; }],
+  ['POST', r('/api/sessions/([^/]+)/rename'), async ([s], b) => {
+    if (!NAME_RE.test(b.to || '')) throw httpErr(400, 'bad name');
+    await tmux('rename-session', '-t', `=${sess(s)}`, b.to); return {};
   }],
-  ['DELETE', /^\/api\/sessions\/([^/]+)$/, async ([s]) => { await tmux('kill-session', '-t', `=${sess(s)}`); return {}; }],
-  ['POST', /^\/api\/sessions\/([^/]+)\/rename$/, async ([s], b) => { await tmux('rename-session', '-t', `=${sess(s)}`, sess(b.to)); return {}; }],
-  ['POST', /^\/api\/sessions\/([^/]+)\/windows$/, async ([s], b) => {
-    const label = presetLabel(b);
-    const cwd = b.cwd ? resolveCwd(b.cwd) : undefined;
-    const idx = (await tmux('new-window', '-P', '-F', '#{window_index}', '-t', `=${sess(s)}:`,
-      ...(cwd ? ['-c', cwd] : []), ...(label ? ['-n', label] : []))).trim();
-    await startCmd(win(s, idx), presetCmd(b));
-    return { window: +idx };
+  ['POST', r('/api/sessions/([^/]+)/windows'), async ([s], b) =>
+    ({ window: +(await addStep(sess(s), b.cwd ? resolveCwd(b.cwd) : undefined, b)).split('.')[0] })],
+  ['DELETE', r(W), async ([s, w]) => { await tmux(w.includes('.') ? 'kill-pane' : 'kill-window', '-t', tgt(s, w)); return {}; }],
+  ['POST', r(`${W}/select`), async ([s, w]) => {
+    await tmux('select-window', '-t', tgt(s, w.split('.')[0]));
+    if (w.includes('.')) await tmux('select-pane', '-t', tgt(s, w));
+    return {};
   }],
-  ['DELETE', /^\/api\/windows\/([^/]+)\/(\d+)$/, async ([s, i]) => { await tmux('kill-window', '-t', win(s, i)); return {}; }],
-  ['POST', /^\/api\/windows\/([^/]+)\/(\d+)\/select$/, async ([s, i]) => { await tmux('select-window', '-t', win(s, i)); return {}; }],
-  ['POST', /^\/api\/windows\/([^/]+)\/(\d+)\/rename$/, async ([s, i], b) => {
+  ['POST', r(`${W}/rename`), async ([s, w], b) => {
     if (typeof b.to !== 'string' || !b.to || b.to.length > 64) throw httpErr(400, 'bad name');
-    await tmux('rename-window', '-t', win(s, i), b.to); return {};
+    await tmux('rename-window', '-t', tgt(s, w.split('.')[0]), b.to); return {};
   }],
-  // send literal text and/or tmux key names (C-c, Enter, Up...)
-  ['POST', /^\/api\/windows\/([^/]+)\/(\d+)\/keys$/, async ([s, i], b) => {
-    const t = win(s, i);
+  ['POST', r(`${W}/move`), async ([s, w], b) => {
+    await tmux('swap-window', '-d', '-s', tgt(s, w.split('.')[0]), '-t', tgt(s, String(b.to | 0))); return {};
+  }],
+  // literal text and/or tmux key names (C-c, Enter, Up...)
+  ['POST', r(`${W}/keys`), async ([s, w], b) => {
+    const t = tgt(s, w);
     if (typeof b.text === 'string' && b.text) await tmux('send-keys', '-t', t, '-l', b.text);
     for (const k of Array.isArray(b.keys) ? b.keys : []) {
       if (!/^[\w-]{1,16}$/.test(k)) throw httpErr(400, `bad key ${k}`);
@@ -129,46 +115,108 @@ const routes = [
     }
     return {};
   }],
-  // stop: interrupt twice (claude/codex need a double ^C), start: rerun the window's command
-  ['POST', /^\/api\/windows\/([^/]+)\/(\d+)\/stop$/, async ([s, i]) => {
-    const t = win(s, i);
-    await tmux('send-keys', '-t', t, 'C-c'); await sleep(250); await tmux('send-keys', '-t', t, 'C-c');
-    return {};
-  }],
-  ['POST', /^\/api\/windows\/([^/]+)\/(\d+)\/start$/, async ([s, i], b) => {
-    const t = win(s, i);
-    const cmd = (b.cmd ?? b.preset) ? presetCmd(b) : (await tmux('show-options', '-wqv', '-t', t, '@tl_cmd')).trim();
-    if (!cmd) throw httpErr(400, 'no command for this window');
+  ['POST', r(`${W}/stop`), async ([s, w]) => { await interrupt(tgt(s, w)); return {}; }],
+  ['POST', r(`${W}/start`), async ([s, w], b) => {
+    const t = tgt(s, w);
+    const cmd = (b.cmd ?? b.preset) ? stepCmd(b) : await storedCmd(t);
+    if (!cmd) throw httpErr(400, 'no command for this pane');
     await startCmd(t, cmd); return {};
   }],
-  ['POST', /^\/api\/windows\/([^/]+)\/(\d+)\/scroll$/, async ([s, i], b) => {
-    const t = win(s, i);
+  ['POST', r(`${W}/split`), async ([s, w], b) => ({ pane: await addStep(sess(s), undefined, { ...b, split: b.dir === 'down' ? 'down' : 'right' }, w) })],
+  ['POST', r(`${W}/pane`), async ([s, w], b) => {
+    const win = tgt(s, w.split('.')[0]);
+    const acts = {
+      next: () => tmux('select-pane', '-t', `${win}.+`),
+      zoom: () => tmux('resize-pane', '-Z', '-t', tgt(s, w)),
+      layout: () => tmux('next-layout', '-t', win),
+      sync: () => tmux('set-option', '-w', '-t', win, 'synchronize-panes'),
+    };
+    if (!acts[b.action]) throw httpErr(400, 'bad action');
+    await acts[b.action](); return {};
+  }],
+  // answer an arrow-key menu (agent permission prompts): move from the selected option to n, then Enter
+  ['POST', r(`${W}/choose`), async ([s, w], b) => {
+    const t = tgt(s, w);
+    const p = detectPrompt(await tmux('capture-pane', '-p', '-t', t));
+    if (!p) throw httpErr(409, 'no question on screen any more');
+    const n = b.n | 0;
+    if (!p.options.some((o) => o.n === n)) throw httpErr(400, 'no such option');
+    for (let i = 0; i < Math.abs(n - p.selected); i++) await tmux('send-keys', '-t', t, n > p.selected ? 'Down' : 'Up');
+    await sleep(80); await tmux('send-keys', '-t', t, 'Enter');
+    return {};
+  }],
+  ['POST', r(`${W}/scroll`), async ([s, w], b) => {
+    const t = tgt(s, w);
     const n = String(Math.max(1, Math.min(b.lines | 0 || 10, 500)));
-    // -e: leaving copy mode automatically when scrolled back to the bottom
-    if (b.dir === 'up') await tmux('copy-mode', '-e', '-t', t), await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-up');
+    // -e: copy mode exits by itself when scrolled back to the bottom
+    if (b.dir === 'up') { await tmux('copy-mode', '-e', '-t', t); await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-up'); }
     else if (b.dir === 'down') await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-down').catch(() => {});
     else await tmux('send-keys', '-t', t, '-X', 'cancel').catch(() => {});
     return {};
   }],
-  ['GET', /^\/api\/windows\/([^/]+)\/(\d+)\/capture$/, async ([s, i], _, q) => {
-    const lines = Math.min(+(q.get('lines') || 30), 2000);
-    return { text: await tmux('capture-pane', '-p', '-J', '-t', win(s, i), '-S', `-${lines}`) };
+  ['GET', r(`${W}/capture`), async ([s, w], _, q) => {
+    const lines = Math.min(+(q.get('lines') || 30), 5000);
+    return { text: await tmux('capture-pane', '-p', '-J', '-t', tgt(s, w), '-S', `-${lines}`) };
   }],
-  ['GET', /^\/api\/presets$/, async () => loadPresets()],
-  ['PUT', /^\/api\/presets$/, async (_, b) => {
-    if (!validPresets(b)) throw httpErr(400, 'invalid presets');
-    fs.writeFileSync(presetFile, JSON.stringify(b, null, 2)); return b;
+  ['GET', r('/api/stats'), async () => {
+    const rows = (await listPanes()).filter((x) => !VIEW_RE.test(x.session_name));
+    return stats(rows.map((x) => ({ session: x.session_name, pid: +x.pane_pid })));
   }],
-  ['GET', /^\/api\/fs$/, async (_, __, q) => {
+  ['GET', r('/api/(?:config/)?(presets|stacks|schedules|settings)'), ([n]) => loadConf(n)],
+  ['PUT', r('/api/(?:config/)?(presets|stacks|schedules|settings)'), ([n], b) => {
+    if (n === 'schedules') for (const s of Array.isArray(b) ? b : []) try { parseCron(s.cron); } catch (e) { throw httpErr(400, `${s.label}: ${e.message}`); }
+    return saveConf(n, b);
+  }],
+  ['POST', r('/api/alerts/test'), async () => {
+    if (!(await notify('tmuxlab test', `Alerts from ${os.hostname()} work.`, { tags: 'bell' }))) throw httpErr(400, 'set an ntfy topic URL first');
+    return {};
+  }],
+  ['GET', r('/api/schedules/status'), () => Object.fromEntries(loadConf('schedules').map((s) => {
+    let next = null; try { next = nextRun(parseCron(s.cron))?.toISOString(); } catch {}
+    return [s.id, { last: lastRuns[s.id] || null, next }];
+  }))],
+  ['POST', r('/api/schedules/([^/]+)/run'), async ([id]) => {
+    const s = loadConf('schedules').find((x) => x.id === id);
+    if (!s) throw httpErr(404, 'no such schedule');
+    await runSchedule(s); return {};
+  }],
+  ['GET', r('/api/git'), (_, __, q) => G.info(q.get('path'))],
+  ['GET', r('/api/git/diff'), async (_, __, q) => ({ diff: await G.diff(q.get('path'), q.get('file')) })],
+  ['POST', r('/api/git/commit'), async (_, b) => ({ result: await G.commit(b.path, b.message) })],
+  ['POST', r('/api/git/push'), async (_, b) => ({ result: await G.push(b.path) })],
+  ['POST', r('/api/git/pr'), async (_, b) => ({ url: await G.pr(b.path, b.title, b.body) })],
+  ['POST', r('/api/git/worktree'), async (_, b) => ({ path: await G.addWorktree(b.path, b.branch) })],
+  ['DELETE', r('/api/git/worktree'), async (_, b) => ({ main: await G.removeWorktree(b.path, !!b.force) })],
+  ['GET', r('/api/fs'), (_, __, q) => {
     const dir = resolveCwd(q.get('path') || '~');
     const dirs = fs.readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && (q.get('hidden') || !d.name.startsWith('.')))
       .map((d) => d.name).sort((a, b) => a.localeCompare(b)).slice(0, 500);
-    const git = fs.existsSync(path.join(dir, '.git'));
-    return { path: dir, parent: path.dirname(dir), dirs, git, home: os.homedir() };
+    return { path: dir, parent: path.dirname(dir), dirs, git: fs.existsSync(path.join(dir, '.git')), home: os.homedir() };
   }],
-  ['GET', /^\/api\/info$/, async () => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim() })],
+  ['GET', r('/api/info'), async () => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2 })],
 ];
+
+// upload into <folder>/.tmuxlab-uploads (git-ignored locally) so agents can read it without leaving the project
+async function upload(req, q) {
+  const dir = resolveCwd(q.get('dir'));
+  const name = path.basename(q.get('name') || 'file').replace(/[^\w.-]/g, '_').slice(-100) || 'file';
+  const dest = path.join(dir, '.tmuxlab-uploads');
+  fs.mkdirSync(dest, { recursive: true });
+  try {
+    const ex = path.resolve(dir, (await G.git(dir, 'rev-parse', '--git-path', 'info/exclude')).trim());
+    const cur = fs.existsSync(ex) ? fs.readFileSync(ex, 'utf8') : '';
+    if (!cur.includes('.tmuxlab-uploads')) { fs.mkdirSync(path.dirname(ex), { recursive: true }); fs.appendFileSync(ex, '\n.tmuxlab-uploads/\n'); }
+  } catch {} // not a git repo
+  const file = path.join(dest, `${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}-${name}`);
+  const out = fs.createWriteStream(file, { mode: 0o600 });
+  let n = 0;
+  await new Promise((res, rej) => {
+    req.on('data', (c) => { n += c.length; if (n > 50 << 20) { req.unpipe(out); out.destroy(); fs.rmSync(file, { force: true }); rej(httpErr(413, 'file over 50 MB')); } });
+    req.pipe(out); out.on('finish', res); out.on('error', rej); req.on('error', rej);
+  });
+  return { path: file, bytes: n };
+}
 
 const readBody = (req) => new Promise((res, rej) => {
   let n = 0; const chunks = [];
@@ -177,12 +225,13 @@ const readBody = (req) => new Promise((res, rej) => {
 });
 
 const send = (res, code, body) => {
+  if (res.headersSent) return;
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
 };
 
-// --- static files: public/ (xterm is copied into public/vendor on install) ---
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
+// --- static files: public/ (xterm and fonts are copied into public/vendor on install) ---
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',
   '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.json': 'application/json' };
 const PUB = path.join(ROOT, 'public');
 
@@ -205,20 +254,21 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   if (!authed((req.headers.authorization || '').replace(/^Bearer /, ''))) return send(res, 401, { error: 'unauthorized' });
-  for (const [m, re, fn] of routes) {
-    const hit = req.method === m && url.pathname.match(re);
-    if (!hit) continue;
-    try {
+  try {
+    if (req.method === 'POST' && url.pathname === '/api/upload') return send(res, 200, await upload(req, url.searchParams));
+    for (const [m, re, fn] of routes) {
+      const hit = req.method === m && url.pathname.match(re);
+      if (!hit) continue;
       const body = m === 'GET' ? {} : await readBody(req);
       return send(res, 200, await fn(hit.slice(1).map(decodeURIComponent), body, url.searchParams));
-    } catch (e) {
-      return send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: (e.stderr || e.message || '').trim() });
     }
+    send(res, 404, { error: 'no route' });
+  } catch (e) {
+    send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: (e.stderr || e.message || '').trim() });
   }
-  send(res, 404, { error: 'no route' });
 });
 
-// --- terminal websocket: one pty per client running `tmux attach` ---
+// --- terminal websocket: each connection gets its own view session and a `tmux attach` pty ---
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
 server.on('upgrade', (req, sock, head) => {
   const url = new URL(req.url, 'http://x');
@@ -226,20 +276,36 @@ server.on('upgrade', (req, sock, head) => {
   if (url.pathname !== '/ws' || !authed(url.searchParams.get('token')) || !NAME_RE.test(s)) {
     sock.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return;
   }
-  wss.handleUpgrade(req, sock, head, (ws) => attach(ws, s, url.searchParams));
+  wss.handleUpgrade(req, sock, head, (ws) => attach(ws, s, url.searchParams).catch((e) => { console.error('attach:', e.message); ws.close(1011); }));
 });
 
-function attach(ws, s, q) {
+async function attach(ws, s, q) {
   const cols = Math.max(10, Math.min(+q.get('cols') || 80, 500));
   const rows = Math.max(5, Math.min(+q.get('rows') || 24, 300));
   const w = q.get('w');
+  const early = []; // input that arrives while the view is being set up
+  const onEarly = (m) => early.push(m);
+  ws.on('message', onEarly);
+  const view = `${s}~tl${crypto.randomBytes(4).toString('hex')}`;
+  try { await tmux('new-session', '-d', '-t', `=${s}`, '-s', view, '-x', String(cols), '-y', String(rows)); }
+  catch { ws.close(4404, 'no such session'); return; }
+  // show the real session name in the status bar, not the internal view name
+  const left = await tmux('show-options', '-gv', 'status-left').catch(() => '');
+  if (left.includes('#S') || left.includes('#{session_name}')) {
+    await tmux('set-option', '-t', `=${view}:`, 'status-left', left.trim().replaceAll('#{session_name}', '#{session_group}').replaceAll('#S', '#{session_group}')).catch(() => {});
+  }
+  const cleanup = () => tmux('kill-session', '-t', `=${view}:`).catch(() => {});
+  if (ws.readyState !== 1) return cleanup();
+  // start on the requested window, else wherever the parent session is
+  const start = w && /^\d{1,4}$/.test(w) ? w : (await tmux('display-message', '-p', '-t', `=${s}:`, '#{window_index}')).trim();
+  await tmux('select-window', '-t', `=${view}:${start}`).catch(() => {});
+  ws.send('\x00TL' + JSON.stringify({ t: 'view', name: view }));
   const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', LANG: process.env.LANG || 'C.UTF-8' };
   delete env.TMUX; // allow attaching even when the server itself runs inside tmux
-  const target = w && /^\d{1,4}$/.test(w) ? `=${s}:${w}` : `=${s}`;
-  const p = pty.spawn(TMUX, [...SOCK, 'attach-session', '-t', target], { name: 'xterm-256color', cols, rows, cwd: os.homedir(), env });
+  const p = pty.spawn(TMUX, [...SOCK, 'attach-session', '-t', `=${view}`], { name: 'xterm-256color', cols, rows, cwd: os.homedir(), env });
   p.onData((d) => ws.readyState === 1 && ws.send(d));
-  p.onExit(({ exitCode }) => { if (ws.readyState === 1) ws.close(4000 + Math.min(exitCode, 999), 'detached'); });
-  ws.on('message', (m) => {
+  p.onExit(({ exitCode }) => { cleanup(); if (ws.readyState === 1) ws.close(4000 + Math.min(exitCode, 999), 'detached'); });
+  const handle = (m) => {
     const msg = m.toString();
     // control frames are JSON prefixed with \x00; everything else is raw input
     if (msg[0] === '\x00') {
@@ -248,12 +314,15 @@ function attach(ws, s, q) {
         if (c.t === 'resize') p.resize(Math.max(10, Math.min(c.cols | 0, 500)), Math.max(5, Math.min(c.rows | 0, 300)));
       } catch {}
     } else p.write(msg);
-  });
-  ws.on('close', () => { try { p.kill(); } catch {} });
+  };
+  ws.off('message', onEarly);
+  ws.on('message', handle);
+  early.forEach(handle);
   const ping = setInterval(() => ws.readyState === 1 && ws.ping(), 25000);
-  ws.on('close', () => clearInterval(ping));
+  ws.on('close', () => { clearInterval(ping); try { p.kill(); } catch {} cleanup(); });
 }
 
+startWatcher(runSchedule);
 server.listen(PORT, HOST, () => {
   // skip docker/bridge interfaces; a loopback bind is only reachable from localhost
   const lan = ['127.0.0.1', 'localhost'].includes(HOST) ? [] : Object.entries(os.networkInterfaces())
@@ -261,7 +330,7 @@ server.listen(PORT, HOST, () => {
     .filter((i) => i.family === 'IPv4' && !i.internal).map((i) => i.address);
   console.log(`tmuxlab listening on ${HOST}:${PORT}\nOpen one of these (the link carries your token):`);
   for (const ip of ['localhost', ...lan]) console.log(`  http://${ip}:${PORT}/#token=${TOKEN}`);
-  console.log(`token: ${tokenFile}\nlaunchers: ${presetFile}`);
+  console.log(`token: ${tokenFile}\nconfig: ${CONF}`);
 });
 
-export { server, TOKEN, validPresets };
+export { server, TOKEN };

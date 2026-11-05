@@ -29,12 +29,22 @@ Install it, then paste a startup link (or address and token) on the connect scre
 
 ## Using it
 
-- **Wall**: every session shows a live tail of its active window. Green light means a program (claude, codex, a test run) is running; grey means an idle shell. Ctrl+K jumps to any session or window; N starts a new one.
-- **New session**: pick a launcher and a folder (browse, or a recent one). The session is named after the folder.
-- **Start / Stop**: Stop sends Ctrl+C twice (what Claude and Codex need to exit). Start reruns the window's launcher command. Restart does both. The session and its shell stay alive either way.
-- **Terminal**: tabs are tmux windows (double-click to rename), + adds a window from a launcher. On phones, the key bar has Esc, Tab, Shift+Tab (Claude mode switch), sticky Ctrl/Alt, arrows (hold to repeat), ^C, ^B (tmux prefix) and symbols. The compose box is the reliable way to type on Android keyboards; multi-line text goes in as one paste.
+- **Wall**: every session shows a live tail of its active window, its git branch, and its CPU and memory use. The top bar shows the machine's CPU, RAM and disk. Green means a program (claude, codex, a test run) is running, grey means an idle shell, and amber means an agent is asking you something. Ctrl+K jumps to any session or window; N starts a new one.
+- **Approve prompts**: when Claude Code, Codex or a similar agent shows an arrow-key menu ("Do you want to proceed? ❯ 1. Yes"), the card and the terminal show its options as buttons. Tapping one answers it. "Needs you" filters to sessions that are waiting.
+- **Phone alerts**: Settings › Phone alerts. Tap New topic, subscribe to that topic in the [ntfy](https://ntfy.sh) app, and the server pushes when an agent asks a question, goes quiet after working, or a launched command exits. This works with tmuxlab closed. ntfy.sh topics are public to anyone who knows the name, so keep the random one, or point it at your own ntfy server.
+- **New session**: pick a launcher or a stack and a folder. In a git repo, "Work on a new branch in its own folder" creates a git worktree (`<repo>.worktrees/<branch>`), so several agents can work on the same repo without colliding.
+- **Stacks**: a stack opens several windows and splits at once, e.g. dev server + tests + claude, or claude and codex side by side. Edit them in Settings › Stacks.
+- **Changes & PR**: the ⎇ branch button in the terminal (or ⋯ › Changes on a card) lists changed files with diffs, then commits, pushes and opens a pull request with `gh`. In a worktree it can also remove the worktree.
+- **Start / Stop**: Stop sends Ctrl+C twice (what Claude and Codex need to exit). Start reruns the pane's launcher command. Restart does both. The session and its shell stay alive either way.
+- **Terminal**: tabs are tmux windows. A dot on a tab means output you haven't seen. Double-click a tab to rename it; right-click or long-press it to move or close it, or open it beside the current one. Panes splits the window right or down, zooms, cycles the layout, or types into all panes at once; chips switch between panes. Find searches the last 3000 lines and copies them. Pinch or A−/A+ changes the text size.
+- **Split view** (tablets and desktop): ⊞ shows up to four windows side by side, from any session. Each one is its own live terminal.
+- **Phones**: the key bar has Esc, Tab, Shift+Tab (Claude mode switch), sticky Ctrl/Alt, arrows (hold to repeat), Paste, ^C, ^B (tmux prefix) and symbols. The message box is the reliable way to type on Android keyboards; multi-line text goes in as one paste. The paperclip uploads files or photos into `.tmuxlab-uploads/` in the pane's folder (git-ignored) and puts the path in the message, ready for the agent.
 - **History**: swipe down or scroll the wheel to page back through tmux history. It exits when you scroll to the bottom or tap Exit.
-- **Launchers**: Settings edits them as JSON (`id`, `label`, `cmd`, optional `icon`), saved to `~/.config/tmuxlab/presets.json`. Add your CI or build commands there.
+- **Schedules**: the clock button runs a launcher or command on a schedule (every hour, daily, weekdays, weekly or a cron expression) in a session, e.g. nightly tests or a morning review by Claude. Run now tries it immediately.
+- **Multiple machines**: tap the machine name to switch between machines, add one, or see which are online. Each machine runs its own tmuxlab server.
+- **Launchers**: Settings › Launchers edits them as JSON (`id`, `label`, `cmd`, optional `icon`).
+
+Config lives in `~/.config/tmuxlab/` (`presets.json`, `stacks.json`, `schedules.json`, `settings.json`, `token`).
 
 Your existing tmux sessions show up too. Sessions whose names contain characters other than letters, digits, `-`, `_` and `.` are listed but can't be controlled. Rename them first.
 
@@ -44,4 +54,4 @@ Your existing tmux sessions show up too. Sessions whose names contain characters
 
 Settings: `PORT` (7681), `HOST` (0.0.0.0), `TMUXLAB_HOME` (~/.config/tmuxlab), `TMUXLAB_TOKEN`, `TMUXLAB_SOCKET` (tmux -L name).
 
-Layout: `server.js` (REST + WebSocket, one `tmux attach` pty per viewer), `public/` (the whole UI, no build step), `scripts/` (vendor copy, icons, APK build, service install), `android/` (Capacitor shell).
+Layout: `server.js` (REST + WebSocket, one `tmux attach` pty per viewer through a grouped "view" session, so each device keeps its own window), `lib/` (tmux, git, cron, stats, alert watcher), `public/` (the whole UI as ES modules in `public/js/`, no build step), `scripts/` (vendor copy, icons, APK build, service install), `android/` (Capacitor shell).

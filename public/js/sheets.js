@@ -1,0 +1,368 @@
+// Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
+import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch } from './core.js';
+import { refresh } from './wall.js';
+import { openTerm, setFont, setTheme, T, THEMES } from './term.js';
+import { start } from './main.js';
+
+// ---------- new session / window ----------
+const dNew = $('#dlg-new');
+let nw = { mode: 'session', pick: 'p:shell', session: null, nameTouched: false, git: false };
+export function openNew(mode = 'session', session = null) {
+  nw = { mode, session, pick: nw.pick, nameTouched: false, git: false };
+  $('#new-title').textContent = mode === 'session' ? 'New session' : `New window in ${session}`;
+  $('#new-name-row').hidden = mode !== 'session';
+  $('#new-go').textContent = mode === 'session' ? 'Start session' : 'Open window';
+  $('#new-name').value = '';
+  const s = session && findSess(session);
+  $('#new-cwd').value = s ? activePane(activeWin(s)).cwd : '';
+  $('#browser').hidden = true;
+  const chip = (key, icon, label, sub, cls = '') => `<button type="button" class="preset ${cls}" data-k="${esc(key)}" aria-pressed="${key === nw.pick}">
+    <span class="ic">${esc(icon)}</span><span>${esc(label)}<small>${esc(sub)}</small></span></button>`;
+  const stacks = mode === 'session' ? S.stacks : [];
+  if (!S.presets.some((p) => 'p:' + p.id === nw.pick) && !stacks.some((x) => 's:' + x.id === nw.pick)) nw.pick = 'p:' + (S.presets[0]?.id || 'shell');
+  $('#new-presets').innerHTML = S.presets.map((p) => chip('p:' + p.id, p.icon || '❯', p.label, p.cmd || 'just a shell')).join('') +
+    stacks.map((x) => chip('s:' + x.id, x.icon || '≡', x.label, `${x.windows.length} windows`, 'stack')).join('');
+  $('#recent').innerHTML = store.get('recent', []).map((d) => `<button type="button" data-d="${esc(d)}">${esc(home(d))}</button>`).join('');
+  $('#wt-row').hidden = true; $('#wt-on').checked = false; $('#wt-branch').hidden = true;
+  dNew.showModal();
+  if (s) checkGit(); // eslint-disable-line
+  (mode === 'session' && !touch ? $('#new-name') : $('#new-cwd')).focus();
+}
+$('#new-presets').addEventListener('click', (e) => {
+  const b = e.target.closest('.preset'); if (!b) return;
+  nw.pick = b.dataset.k;
+  for (const x of $('#new-presets').children) x.setAttribute('aria-pressed', x === b);
+});
+$('#new-name').addEventListener('input', () => { nw.nameTouched = true; suggestBranch(); });
+function setCwd(d, git) {
+  $('#new-cwd').value = d;
+  if (!nw.nameTouched && nw.mode === 'session') $('#new-name').value = d.split('/').filter(Boolean).pop()?.replace(/[^\w.-]/g, '-').slice(0, 64) || '';
+  if (git === undefined) checkGit(); else showGit(git);
+}
+let gitT;
+function checkGit() {
+  clearTimeout(gitT);
+  gitT = setTimeout(async () => {
+    const p = $('#new-cwd').value.trim();
+    if (!p) return showGit(false);
+    try { await api('/api/git?path=' + encodeURIComponent(p)); showGit(true); } catch { showGit(false); }
+  }, 300);
+}
+function showGit(g) { nw.git = g; $('#wt-row').hidden = !g || nw.mode !== 'session'; suggestBranch(); }
+function suggestBranch() {
+  const b = $('#wt-branch');
+  if (b.dataset.touched) return;
+  const n = ($('#new-name').value || 'task').replace(/[^\w.-]/g, '-');
+  b.value = `agent/${n}-${new Date().toISOString().slice(5, 10).replace('-', '')}`;
+}
+$('#wt-on').addEventListener('change', (e) => { $('#wt-branch').hidden = !e.target.checked; });
+$('#wt-branch').addEventListener('input', (e) => { e.target.dataset.touched = 1; });
+$('#new-cwd').addEventListener('input', checkGit);
+$('#recent').addEventListener('click', (e) => { const b = e.target.closest('[data-d]'); if (b) setCwd(b.dataset.d); });
+$('#new-browse').addEventListener('click', () => browse($('#new-cwd').value || '~'));
+async function browse(p) {
+  let r;
+  try { r = await api('/api/fs?path=' + encodeURIComponent(p)); } catch (e) { toast(e.message, true); return; }
+  const br = $('#browser');
+  br.hidden = false;
+  br.innerHTML = `<div class="bh"><button type="button" class="btn sm ghost" data-up aria-label="Parent folder">↑</button><span>${esc(r.path)}</span>
+    <button type="button" class="btn sm primary" data-use>Use${r.git ? ' (git)' : ''}</button></div>
+    ${r.dirs.map((d) => `<button type="button" class="d" data-d="${esc(d)}">${esc(d)}/</button>`).join('') || '<div class="d muted">No subfolders</div>'}`;
+  br.onclick = (e) => {
+    if (e.target.closest('[data-up]')) return browse(r.parent);
+    if (e.target.closest('[data-use]')) { setCwd(r.path, r.git); br.hidden = true; return; }
+    const d = e.target.closest('[data-d]'); if (d) browse(r.path.replace(/\/$/, '') + '/' + d.dataset.d);
+  };
+  setCwd(r.path, r.git);
+}
+$('#new-form').addEventListener('submit', async (e) => {
+  if (e.submitter?.value !== 'ok') return;
+  e.preventDefault();
+  const cwd = $('#new-cwd').value.trim() || undefined;
+  const [kind, id] = nw.pick.split(':');
+  const what = kind === 's' ? { stack: id } : { preset: id };
+  const btn = $('#new-go'); btn.disabled = true;
+  try {
+    if (nw.mode === 'session') {
+      const wt = !$('#wt-row').hidden && $('#wt-on').checked ? { worktree: { branch: $('#wt-branch').value.trim() } } : {};
+      const r = await act('/api/sessions', { name: $('#new-name').value.trim() || undefined, cwd, ...what, ...wt });
+      dNew.close(); remember(cwd); if (wt.worktree) toast(`Branch ${wt.worktree.branch} in ${home(r.cwd)}`);
+      await refresh(); openTerm(r.name);
+    } else {
+      await act(`/api/sessions/${encodeURIComponent(nw.session)}/windows`, { ...what, cwd });
+      dNew.close(); remember(cwd); refresh();
+    }
+  } catch {} finally { btn.disabled = false; }
+});
+function remember(d) { if (d) store.set('recent', [d, ...store.get('recent', []).filter((x) => x !== d)].slice(0, 6)); }
+
+// ---------- changes: diff, commit, push, PR, worktree ----------
+const dCh = $('#dlg-changes');
+let chPath = null;
+export async function openChanges(path) {
+  chPath = path;
+  $('#ch-body').innerHTML = '<p class="muted">Reading git status…</p>';
+  $('#ch-msg').value = '';
+  dCh.showModal();
+  await loadChanges();
+}
+async function loadChanges() {
+  let g;
+  try { g = await api('/api/git?path=' + encodeURIComponent(chPath)); } catch (e) { $('#ch-body').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  $('#ch-title').textContent = `⎇ ${g.branch}`;
+  $('#ch-sub').textContent = [home(g.root), g.upstream && `tracks ${g.upstream}${g.track ? ` (${g.track})` : ''}`, g.isWorktree && 'separate worktree'].filter(Boolean).join(' · ');
+  $('#ch-wt').hidden = !g.isWorktree;
+  $('#ch-pr').disabled = $('#ch-push').disabled = !g.remote;
+  $('#ch-commit').disabled = !g.files.length;
+  $('#ch-body').innerHTML = g.files.length ? `<ul class="files">${g.files.map((f) => `<li><button class="file" data-f="${esc(f.file)}">
+      <span class="st st-${esc(f.status[0] === '?' ? 'n' : f.status[0])}">${esc(f.status === '??' ? 'new' : f.status)}</span>
+      <span class="fn">${esc(f.file)}</span><span class="num">${f.status === '??' ? '' : `<i class="a">+${f.add}</i> <i class="d">−${f.del}</i>`}</span></button><div class="diff" hidden></div></li>`).join('')}</ul>`
+    : `<p class="muted">No changes. Last commit: ${esc(g.last || 'none')}</p>`;
+}
+$('#ch-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('.file'); if (!b) return;
+  const box = b.nextElementSibling;
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false; box.textContent = 'Loading…';
+  try {
+    const { diff } = await api(`/api/git/diff?path=${encodeURIComponent(chPath)}&file=${encodeURIComponent(b.dataset.f)}`);
+    box.innerHTML = diff.split('\n').filter((l) => !/^(diff --git|index |--- |\+\+\+ |new file mode)/.test(l)).map((l) =>
+      `<div class="${l[0] === '+' ? 'add' : l[0] === '-' ? 'del' : l.startsWith('@@') ? 'hunk' : ''}">${esc(l) || ' '}</div>`).join('') || '<div class="muted">Binary or empty file</div>';
+  } catch (err) { box.textContent = err.message; }
+});
+$('#ch-commit').addEventListener('click', async () => {
+  const message = $('#ch-msg').value.trim();
+  if (!message) { $('#ch-msg').focus(); return toast('Write a commit message first', true); }
+  const r = await act('/api/git/commit', { path: chPath, message }); toast(r.result); $('#ch-msg').value = ''; loadChanges();
+});
+$('#ch-push').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  try { await act('/api/git/push', { path: chPath }); toast('Pushed'); loadChanges(); } catch {} finally { e.target.disabled = false; }
+});
+$('#ch-pr').addEventListener('click', async (e) => {
+  const title = prompt('Pull request title (leave empty to use the commits)', '');
+  if (title === null) return;
+  e.target.disabled = true;
+  try {
+    const { url } = await act('/api/git/pr', { path: chPath, title: title.trim() || undefined });
+    toast('Pull request ready', false, { action: 'Open', run: () => window.open(url, '_blank') });
+  } catch {} finally { e.target.disabled = false; }
+});
+$('#ch-wt').addEventListener('click', async () => {
+  if (!confirm('Remove this worktree folder? The branch stays in the repository.')) return;
+  try { await api('/api/git/worktree', { method: 'DELETE', body: { path: chPath } }); }
+  catch (e) {
+    if (!confirm(`${e.message}\n\nRemove it anyway and lose uncommitted changes?`)) return;
+    await act('/api/git/worktree', { path: chPath, force: true }, 'DELETE');
+  }
+  toast('Worktree removed'); dCh.close();
+});
+
+// ---------- find & copy over tmux history ----------
+const dFind = $('#dlg-find');
+let fText = '', fHits = [], fIdx = 0;
+export async function openFind(target, title) {
+  $('#find-title').textContent = title;
+  $('#find-q').value = '';
+  $('#find-pre').textContent = 'Loading history…';
+  dFind.showModal();
+  try { fText = (await api(`${target}/capture?lines=3000`)).text.replace(/\s+$/, ''); } catch (e) { fText = e.message; }
+  renderFind();
+  const pre = $('#find-pre'); pre.scrollTop = pre.scrollHeight;
+  if (!touch) $('#find-q').focus();
+}
+function renderFind() {
+  const q = $('#find-q').value;
+  const pre = $('#find-pre');
+  if (!q) { pre.textContent = fText; fHits = []; $('#find-n').textContent = ''; return; }
+  const low = fText.toLowerCase(), ql = q.toLowerCase();
+  let html = '', at = 0, i; fHits = [];
+  while ((i = low.indexOf(ql, at)) >= 0 && fHits.length < 2000) {
+    html += esc(fText.slice(at, i)) + `<mark data-h="${fHits.length}">${esc(fText.slice(i, i + q.length))}</mark>`;
+    fHits.push(i); at = i + q.length;
+  }
+  pre.innerHTML = html + esc(fText.slice(at));
+  fIdx = fHits.length - 1; // newest match first
+  jump(0);
+}
+function jump(d) {
+  if (!fHits.length) { $('#find-n').textContent = $('#find-q').value ? 'no matches' : ''; return; }
+  fIdx = (fIdx + d + fHits.length) % fHits.length;
+  $$('#find-pre mark.cur').forEach((m) => m.classList.remove('cur'));
+  const m = $(`#find-pre mark[data-h="${fIdx}"]`);
+  m.classList.add('cur'); m.scrollIntoView({ block: 'center' });
+  $('#find-n').textContent = `${fIdx + 1} of ${fHits.length}`;
+}
+$('#find-q').addEventListener('input', renderFind);
+$('#find-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jump(e.shiftKey ? 1 : -1); } });
+$('#find-prev').addEventListener('click', () => jump(-1));
+$('#find-next').addEventListener('click', () => jump(1));
+$('#find-copy').addEventListener('click', async () => {
+  const sel = getSelection().toString();
+  try { await navigator.clipboard.writeText(sel || fText); toast(sel ? 'Copied selection' : 'Copied all'); }
+  catch { toast('Select the text and use your device\'s copy', true); }
+});
+
+// ---------- jump palette (also picks a window for split view) ----------
+const dPal = $('#dlg-palette');
+let pal = { items: [], sel: 0, pick: null };
+export function openPalette() { pal.pick = null; $('#pal-q').placeholder = 'Jump to session or window…'; openPal(); }
+export function pickWindow(title, cb) { pal.pick = cb; $('#pal-q').placeholder = title; openPal(); }
+function openPal() { $('#pal-q').value = ''; pal.sel = 0; renderPal(); dPal.showModal(); $('#pal-q').focus(); }
+function renderPal() {
+  const q = $('#pal-q').value.toLowerCase();
+  const go = (s, w) => pal.pick ? () => pal.pick(s, w) : async () => { if (w != null) await act(`${W(s, w)}/select`); openTerm(s); };
+  pal.items = [
+    ...S.sessions.flatMap((s) => [
+      ...(pal.pick ? [] : [{ label: s.name, meta: `${s.windows.length} windows`, dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
+      ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: w.running ? w.cmd : home(w.cwd), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
+    ]),
+    ...(pal.pick ? [] : [{ label: 'New session…', meta: '', go: () => openNew() }, { label: 'Schedules', meta: '', go: openSchedules }, { label: 'Settings', meta: '', go: openSettings }]),
+  ].filter((x) => x.label.toLowerCase().includes(q)).slice(0, 60);
+  pal.sel = Math.min(pal.sel, Math.max(0, pal.items.length - 1));
+  $('#pal-list').innerHTML = pal.items.map((x, i) => `<li role="option" data-i="${i}" aria-selected="${i === pal.sel}">
+    <span class="dot ${x.dot || ''}"></span>${esc(x.label)}<span class="m">${esc(x.meta)}</span></li>`).join('');
+}
+$('#pal-q').addEventListener('input', () => { pal.sel = 0; renderPal(); });
+$('#pal-q').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); pal.sel = (pal.sel + (e.key === 'ArrowDown' ? 1 : -1) + pal.items.length) % pal.items.length; renderPal(); }
+  if (e.key === 'Enter' && pal.items[pal.sel]) { dPal.close(); pal.items[pal.sel].go(); }
+});
+$('#pal-list').addEventListener('click', (e) => { const li = e.target.closest('li'); if (li) { dPal.close(); pal.items[li.dataset.i].go(); } });
+
+// ---------- schedules ----------
+const dSch = $('#dlg-sched');
+let sch = [], schStatus = {}, editing = null;
+const EVERY = [['hourly', 'Every hour'], ['daily', 'Every day at'], ['weekdays', 'Weekdays at'], ['weekly', 'Every Monday at'], ['custom', 'Custom (cron)']];
+const toCron = (kind, time, custom) => {
+  const [h, m] = (time || '09:00').split(':').map(Number);
+  return { hourly: `${m} * * * *`, daily: `${m} ${h} * * *`, weekdays: `${m} ${h} * * 1-5`, weekly: `${m} ${h} * * 1`, custom }[kind];
+};
+const fromCron = (c) => {
+  const m = c.match(/^(\d+) (\*|\d+) \* \* (\*|1-5|1)$/);
+  if (!m) return { kind: 'custom', time: '09:00' };
+  const time = `${String(m[2] === '*' ? 9 : m[2]).padStart(2, '0')}:${String(m[1]).padStart(2, '0')}`;
+  return { kind: m[2] === '*' ? (m[3] === '*' ? 'hourly' : 'custom') : { '*': 'daily', '1-5': 'weekdays', 1: 'weekly' }[m[3]], time };
+};
+const human = (c) => { const f = fromCron(c); return f.kind === 'custom' ? `cron ${c}` : f.kind === 'hourly' ? `every hour at :${f.time.slice(3)}` : `${EVERY.find((x) => x[0] === f.kind)[1].toLowerCase()} ${f.time}`; };
+export async function openSchedules() {
+  dSch.showModal();
+  editing = null;
+  await loadSched();
+}
+async function loadSched() {
+  try { [sch, schStatus] = await Promise.all([api('/api/config/schedules'), api('/api/schedules/status')]); } catch (e) { toast(e.message, true); }
+  renderSched();
+}
+function renderSched() {
+  $('#sch-form').hidden = editing === null;
+  $('#sch-list').hidden = editing !== null;
+  $('#sch-add').hidden = editing !== null;
+  if (editing !== null) return fillForm();
+  const when = (iso) => iso ? new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+  $('#sch-list').innerHTML = sch.length ? sch.map((s, i) => `<li class="sch">
+      <label class="sw"><input type="checkbox" data-on="${i}" ${s.enabled ? 'checked' : ''} aria-label="Enabled"><span></span></label>
+      <div class="si"><b>${esc(s.label)}</b><small>${esc(human(s.cron))} · ${esc(s.cmd ?? S.presets.find((p) => p.id === s.preset)?.label ?? '')} · in ${esc(s.session || 'scheduled')}</small>
+      <small class="muted">next ${when(schStatus[s.id]?.next)}${schStatus[s.id]?.last ? ` · last ran ${when(schStatus[s.id].last)}` : ''}</small></div>
+      <button class="btn sm" data-run="${i}">Run now</button><button class="btn sm ghost" data-edit="${i}">Edit</button></li>`).join('')
+    : '<li class="muted empty-s">Nothing scheduled. Add nightly tests, a morning review by Claude, or a periodic build.</li>';
+}
+function fillForm() {
+  const s = sch[editing] || { label: '', cron: '0 9 * * 1-5', session: 'scheduled', cwd: '', preset: S.presets[0]?.id, enabled: true };
+  const f = fromCron(s.cron);
+  $('#sf-label').value = s.label; $('#sf-kind').value = f.kind; $('#sf-time').value = f.time; $('#sf-cron').value = s.cron;
+  $('#sf-cwd').value = s.cwd || ''; $('#sf-session').value = s.session || 'scheduled';
+  $('#sf-what').innerHTML = S.presets.map((p) => `<option value="p:${esc(p.id)}">${esc(p.label)}</option>`).join('') + '<option value="cmd">Command…</option>';
+  $('#sf-what').value = s.cmd !== undefined ? 'cmd' : `p:${s.preset}`;
+  $('#sf-cmd').value = s.cmd || '';
+  $('#sf-del').hidden = !sch[editing];
+  syncForm();
+}
+function syncForm() {
+  const k = $('#sf-kind').value;
+  $('#sf-time').hidden = k === 'custom';
+  $('#sf-cron').hidden = k !== 'custom';
+  $('#sf-cmd').hidden = $('#sf-what').value !== 'cmd';
+}
+$('#sf-kind').addEventListener('change', syncForm);
+$('#sf-what').addEventListener('change', syncForm);
+$('#sch-add').addEventListener('click', () => { editing = sch.length; renderSched(); $('#sf-label').focus(); });
+$('#sf-cancel').addEventListener('click', () => { editing = null; renderSched(); });
+const saveSched = async (list) => { await act('/api/config/schedules', list, 'PUT'); sch = list; schStatus = await api('/api/schedules/status').catch(() => ({})); editing = null; renderSched(); };
+$('#sf-save').addEventListener('click', async () => {
+  const label = $('#sf-label').value.trim();
+  if (!label) return toast('Give the schedule a name', true);
+  const what = $('#sf-what').value;
+  const old = sch[editing];
+  const s = { id: old?.id || `s${Date.now().toString(36)}`, label, cron: toCron($('#sf-kind').value, $('#sf-time').value, $('#sf-cron').value.trim()),
+    session: $('#sf-session').value.trim() || 'scheduled', enabled: old?.enabled ?? true,
+    ...($('#sf-cwd').value.trim() ? { cwd: $('#sf-cwd').value.trim() } : {}),
+    ...(what === 'cmd' ? { cmd: $('#sf-cmd').value } : { preset: what.slice(2) }) };
+  const list = [...sch]; list[editing] = s;
+  try { await saveSched(list); toast(`Saved ${label}`); } catch {}
+});
+$('#sf-del').addEventListener('click', async () => {
+  if (!confirm(`Delete schedule "${sch[editing].label}"?`)) return;
+  await saveSched(sch.filter((_, i) => i !== editing)).catch(() => {});
+});
+$('#sch-list').addEventListener('click', async (e) => {
+  const run = e.target.closest('[data-run]'), ed = e.target.closest('[data-edit]');
+  if (run) { await act(`/api/schedules/${sch[run.dataset.run].id}/run`); toast(`Started ${sch[run.dataset.run].label}`); refresh(); loadSched(); }
+  if (ed) { editing = +ed.dataset.edit; renderSched(); }
+});
+$('#sch-list').addEventListener('change', async (e) => {
+  const i = e.target.dataset.on; if (i === undefined) return;
+  const list = sch.map((s, j) => j === +i ? { ...s, enabled: e.target.checked } : s);
+  await saveSched(list).catch(() => { e.target.checked = !e.target.checked; });
+});
+
+// ---------- settings ----------
+const dSet = $('#dlg-settings');
+export async function openSettings(tab = 'alerts') {
+  $('#set-err').textContent = '';
+  $('#set-server').textContent = `${cfg().name || S.info?.host || ''} · ${cfg().base}`;
+  $('#set-presets').value = JSON.stringify(S.presets, null, 2);
+  $('#set-stacks').value = JSON.stringify(S.stacks, null, 2);
+  $('#set-theme').innerHTML = Object.keys(THEMES).map((k) => `<option value="${k}">${k[0].toUpperCase() + k.slice(1)}</option>`).join('');
+  $('#set-theme').value = T.theme;
+  $('#set-font').value = T.fontSize;
+  $('#set-awake').checked = store.get('awake', touch);
+  setTab(tab);
+  dSet.showModal();
+  try {
+    const st = await api('/api/config/settings');
+    $('#al-url').value = st.ntfy; $('#al-prompts').checked = st.alerts.prompts; $('#al-quiet').checked = st.alerts.quiet;
+    $('#al-finished').checked = st.alerts.finished; $('#al-secs').value = st.alerts.quietSeconds; $('#al-agents').value = st.agents.join(', ');
+    $('#al-sub').hidden = !st.ntfy; $('#al-sub').href = st.ntfy.replace(/^http:/, 'https:');
+  } catch (e) { $('#set-err').textContent = e.message; }
+}
+function setTab(t) {
+  for (const b of $$('#set-tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === t);
+  for (const p of $$('#settings-form [data-pane]')) p.hidden = p.dataset.pane !== t;
+}
+$('#set-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
+$('#al-gen').addEventListener('click', () => {
+  $('#al-url').value = `https://ntfy.sh/tmuxlab-${crypto.getRandomValues(new Uint32Array(2)).reduce((a, n) => a + n.toString(36), '')}`;
+});
+async function saveAlerts() {
+  const url = $('#al-url').value.trim();
+  const body = { ntfy: url, alerts: { prompts: $('#al-prompts').checked, quiet: $('#al-quiet').checked, finished: $('#al-finished').checked,
+    quietSeconds: Math.max(5, +$('#al-secs').value || 20) }, agents: $('#al-agents').value.split(/[,\s]+/).filter(Boolean) };
+  await act('/api/config/settings', body, 'PUT');
+  $('#al-sub').hidden = !url; $('#al-sub').href = url.replace(/^http:/, 'https:');
+}
+$('#al-test').addEventListener('click', async () => { try { await saveAlerts(); await act('/api/alerts/test'); toast('Test alert sent. Check your phone.'); } catch {} });
+$('#set-save').addEventListener('click', async () => {
+  const parse = (id, name) => { try { return JSON.parse($(id).value); } catch (e) { throw new Error(`${name}: not valid JSON (${e.message})`); } };
+  try {
+    const presets = parse('#set-presets', 'Launchers'), stacks = parse('#set-stacks', 'Stacks');
+    [S.presets, S.stacks] = await Promise.all([api('/api/config/presets', { method: 'PUT', body: presets }), api('/api/config/stacks', { method: 'PUT', body: stacks })]);
+    await saveAlerts();
+    setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked);
+    dSet.close(); toast('Settings saved');
+  } catch (e) { $('#set-err').textContent = e.message; }
+});
+$('#set-logout').addEventListener('click', () => {
+  if (!confirm('Disconnect and forget this machine on this device?')) return;
+  S.machines.splice(S.cur, 1); S.cur = 0; saveMachines(); dSet.close(); start();
+});
