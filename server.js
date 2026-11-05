@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
 import { CONF, httpErr, sleep, resolveCwd, loadConf, saveConf, NAME_RE } from './lib/util.js';
-import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, storedCmd, interrupt, killViews, detectPrompt, VIEW_RE } from './lib/tmux.js';
+import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, setProject, storedCmd, interrupt, killViews, detectPrompt, VIEW_RE } from './lib/tmux.js';
 import * as G from './lib/git.js';
 import { stats } from './lib/stats.js';
 import { parseCron, nextRun } from './lib/cron.js';
@@ -52,15 +52,17 @@ async function addStep(name, cwd, st, splitOf) {
   return where;
 }
 
-async function createSession({ name, cwd, stack, worktree, ...st }) {
+async function createSession({ name, cwd, stack, worktree, project, ...st }) {
   name = sess(name || `s${Date.now().toString(36).slice(-5)}`);
   if (VIEW_RE.test(name)) throw httpErr(400, 'bad session name');
+  if (project && !NAME_RE.test(project)) throw httpErr(400, 'bad project');
   let dir = resolveCwd(cwd);
   if (worktree?.branch) dir = await G.addWorktree(dir, worktree.branch);
   const steps = stack ? loadConf('stacks').find((s) => s.id === stack)?.windows : [st];
   if (!steps) throw httpErr(400, `no stack ${stack}`);
   const label = stepLabel(steps[0]);
   await tmux('new-session', '-d', '-s', name, '-c', dir, '-x', '200', '-y', '50', ...(label ? ['-n', label] : []));
+  if (project) await setProject(name, project);
   const first = (await tmux('display-message', '-p', '-t', `=${name}:`, '#{window_index}')).trim();
   await startCmd(tgt(name, first), stepCmd(steps[0]));
   let last = first;
@@ -90,6 +92,7 @@ const routes = [
     if (!NAME_RE.test(b.to || '')) throw httpErr(400, 'bad name');
     await tmux('rename-session', '-t', `=${sess(s)}`, b.to); return {};
   }],
+  ['POST', r('/api/sessions/([^/]+)/project'), async ([s], b) => { await setProject(s, b.project || ''); return {}; }],
   ['POST', r('/api/sessions/([^/]+)/windows'), async ([s], b) =>
     ({ window: +(await addStep(sess(s), b.cwd ? resolveCwd(b.cwd) : undefined, b)).split('.')[0] })],
   ['DELETE', r(W), async ([s, w]) => { await tmux(w.includes('.') ? 'kill-pane' : 'kill-window', '-t', tgt(s, w)); return {}; }],
@@ -162,8 +165,8 @@ const routes = [
     const rows = (await listPanes()).filter((x) => !VIEW_RE.test(x.session_name));
     return stats(rows.map((x) => ({ session: x.session_name, pid: +x.pane_pid })));
   }],
-  ['GET', r('/api/(?:config/)?(presets|stacks|schedules|settings)'), ([n]) => loadConf(n)],
-  ['PUT', r('/api/(?:config/)?(presets|stacks|schedules|settings)'), ([n], b) => {
+  ['GET', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects)'), ([n]) => loadConf(n)],
+  ['PUT', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects)'), ([n], b) => {
     if (n === 'schedules') for (const s of Array.isArray(b) ? b : []) try { parseCron(s.cron); } catch (e) { throw httpErr(400, `${s.label}: ${e.message}`); }
     return saveConf(n, b);
   }],

@@ -190,3 +190,20 @@ test('settings keep defaults and reject bad URLs', async () => {
   await assert.rejects(api('/api/config/settings', 'PUT', { ntfy: 'file:///etc/passwd' }), /400/);
   await assert.rejects(api('/api/alerts/test', 'POST'), /400/);
 });
+
+test('projects: config, assign on create, move, survive rename, clear', async () => {
+  assert.deepEqual(await api('/api/config/projects'), []);
+  await api('/api/config/projects', 'PUT', [{ id: 'web', label: 'Web app', cwd: home }, { id: 'ml', label: 'ML' }]);
+  await assert.rejects(api('/api/config/projects', 'PUT', [{ id: 'a', label: 'A' }, { id: 'a', label: 'B' }]), /400/);
+  await api('/api/sessions', 'POST', { name: 'pj', cwd: home, project: 'web' });
+  assert.equal((await find('pj')).project, 'web');
+  await api('/api/sessions/pj/project', 'POST', { project: 'ml' });
+  await api('/api/sessions/pj/rename', 'POST', { to: 'pj2' });
+  assert.equal((await find('pj2')).project, 'ml');
+  await api('/api/sessions/pj2/project', 'POST', { project: '' });
+  assert.equal((await find('pj2')).project, '');
+  await assert.rejects(api('/api/sessions/pj2/project', 'POST', { project: 'bad id' }), /400/);
+  await assert.rejects(api('/api/sessions', 'POST', { name: 'pj3', cwd: home, project: 'bad id' }), /400/);
+  assert.equal(await find('pj3'), undefined);
+  await api('/api/sessions/pj2', 'DELETE');
+});

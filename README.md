@@ -32,6 +32,7 @@ Install it, then paste a startup link (or address and token) on the connect scre
 - **Wall**: every session shows a live tail of its active window, its git branch, and its CPU and memory use. The top bar shows the machine's CPU, RAM and disk. Green means a program (claude, codex, a test run) is running, grey means an idle shell, and amber means an agent is asking you something. Ctrl+K jumps to any session or window; N starts a new one.
 - **Approve prompts**: when Claude Code, Codex or a similar agent shows an arrow-key menu ("Do you want to proceed? ❯ 1. Yes"), the card and the terminal show its options as buttons. Tapping one answers it. "Needs you" filters to sessions that are waiting.
 - **Phone alerts**: Settings › Phone alerts. Tap New topic, subscribe to that topic in the [ntfy](https://ntfy.sh) app, and the server pushes when an agent asks a question, goes quiet after working, or a launched command exits. This works with tmuxlab closed. ntfy.sh topics are public to anyone who knows the name, so keep the random one, or point it at your own ntfy server.
+- **Projects**: folders for sessions. **+ Project** adds one with an optional default folder; each project is a collapsible section on the wall with its own **+ Session** button. Move a session with ⋯ › Move to project, or drag its card onto a project heading on desktop. The project is stored on the tmux session (`@tl_project`), so every device sees the same grouping and it survives renames. Deleting a project keeps its sessions running under No project.
 - **New session**: pick a launcher or a stack and a folder. In a git repo, "Work on a new branch in its own folder" creates a git worktree (`<repo>.worktrees/<branch>`), so several agents can work on the same repo without colliding.
 - **Stacks**: a stack opens several windows and splits at once, e.g. dev server + tests + claude, or claude and codex side by side. Edit them in Settings › Stacks.
 - **Changes & PR**: the ⎇ branch button in the terminal (or ⋯ › Changes on a card) lists changed files with diffs, then commits, pushes and opens a pull request with `gh`. In a worktree it can also remove the worktree.
@@ -44,7 +45,7 @@ Install it, then paste a startup link (or address and token) on the connect scre
 - **Multiple machines**: tap the machine name to switch between machines, add one, or see which are online. Each machine runs its own tmuxlab server.
 - **Launchers**: Settings › Launchers edits them as JSON (`id`, `label`, `cmd`, optional `icon`).
 
-Config lives in `~/.config/tmuxlab/` (`presets.json`, `stacks.json`, `schedules.json`, `settings.json`, `token`).
+Config lives in `~/.config/tmuxlab/` (`presets.json`, `projects.json`, `stacks.json`, `schedules.json`, `settings.json`, `token`).
 
 Your existing tmux sessions show up too. Sessions whose names contain characters other than letters, digits, `-`, `_` and `.` are listed but can't be controlled. Rename them first.
 

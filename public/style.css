@@ -289,9 +289,27 @@ a { color: var(--run); }
 .compose #attach { font-size: 18px; }
 
 #btn-new .plus { display: none; }
+.filters { align-items: center; }
+/* project folders on the wall */
+.phead { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 10px 4px 2px; border-bottom: 1px solid var(--line); margin-top: 6px; min-width: 0; }
+.phead:first-child { margin-top: 0; }
+.phead .pt { display: flex; align-items: center; gap: 8px; background: none; border: 0; cursor: pointer; padding: 4px 6px 4px 0; min-width: 0; color: var(--act); }
+.phead.none .pt { color: var(--muted); }
+.phead .pt svg { flex: none; }
+.phead .pt b { flex: none; max-width: 55vw; font-size: 17px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phead .chev { width: 12px; color: var(--muted); font-size: 12px; }
+.phead .pc { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.phead .pc i { font-style: normal; }
+.phead .pc .r { color: var(--run); }
+.phead .pc .q { color: var(--act); }
+.phead .pd { font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.phead.drop { background: color-mix(in srgb, var(--act) 12%, transparent); border-bottom-color: var(--act); border-radius: 8px 8px 0 0; }
+.card[draggable="true"] { cursor: grab; }
+.card[draggable="true"] .screen, .card[draggable="true"] button { cursor: pointer; }
 /* in the terminal, toasts sit at the top so they don't cover the keys */
 body:has(#term:not([hidden])) #toasts { bottom: auto; top: calc(var(--safe-t) + 96px); }
 @media (max-width: 640px) {
+  .phead .pd, .phead [data-pnew] .lbl { display: none; }
   #btn-new .plus { display: inline; font-size: 20px; line-height: 1; }
   #btn-new .lbl { display: none; }
   #btn-new { padding: 6px 14px; }

@@ -1,5 +1,5 @@
 // The session wall: live previews, status, approvals, machine stats.
-import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch } from './core.js';
 import { openTerm, renderTermBar } from './term.js';
 import { openNew, openChanges, openPalette, openSettings, openSchedules } from './sheets.js';
 import { start, addMachine } from './main.js';
@@ -44,7 +44,7 @@ function renderStats() {
 
 export async function refreshPreviews() {
   if ($('#wall').hidden || document.hidden) return;
-  const list = visible().slice(0, 24);
+  const list = visible().filter((s) => !S.projects.length || !collapsed.has(projectOf(s))).slice(0, 24);
   await Promise.all(list.map(async (s) => {
     const w = activeWin(s);
     try { S.previews[s.name] = (await api(`${W(s.name, w.index)}/capture?lines=14`)).text.replace(/\s+$/, ''); } catch {}
@@ -64,52 +64,93 @@ function promptHtml(s, w) {
     <div class="aopts">${p.prompt.options.map((o) => `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label.length > 34 ? o.label.slice(0, 32) + '…' : o.label)}</button>`).join('')}</div></div>`;
 }
 
+const FOLDER = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 014.5 5h4.3l2 2.2h8.7A1.5 1.5 0 0121 8.7v9.8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18.5z" fill="currentColor" opacity=".85"/></svg>';
+const collapsed = new Set(store.get('collapsed', []));
+export const projectOf = (s) => S.projects.some((p) => p.id === s.project) ? s.project : '';
+
 export function renderWall() {
   renderStats();
   $('#machine-name').textContent = cfg()?.name || (S.info ? `${S.info.user}@${S.info.host}` : '');
-  $('#empty').hidden = S.sessions.length > 0;
+  $('#empty').hidden = S.sessions.length > 0 || S.projects.length > 0;
   const grid = $('#grid');
   const list = visible();
-  const keep = new Set(list.map((s) => s.name));
-  for (const c of [...grid.children]) if (!keep.has(c.dataset.s)) c.remove();
-  list.forEach((s, i) => {
-    let card = grid.querySelector(`.card[data-s="${CSS.escape(s.name)}"]`);
-    if (!card) {
-      card = document.createElement('article');
-      card.className = 'card';
-      card.dataset.s = s.name;
-      card.innerHTML = `<div class="card-h"></div><div class="wins"></div><div class="asks"></div>
-        <div class="screen" role="button" tabindex="0" aria-label="Open ${esc(s.name)}"><span class="path"></span><pre></pre></div>
-        <div class="card-f"></div>`;
-      $('pre', card).textContent = S.previews[s.name] ?? '';
+  // with projects, the wall is a set of folders; without, just cards
+  const nodes = [];
+  if (!S.projects.length) nodes.push(...list.map(cardFor));
+  else {
+    for (const p of [...S.projects, { id: '', label: 'No project' }]) {
+      const mine = list.filter((s) => projectOf(s) === p.id);
+      const total = S.sessions.filter((s) => projectOf(s) === p.id);
+      if (!mine.length && (S.filter !== 'all' || (!p.id && !total.length))) continue;
+      nodes.push(headerFor(p, total));
+      if (!collapsed.has(p.id)) nodes.push(...mine.map(cardFor));
     }
-    if (grid.children[i] !== card) grid.insertBefore(card, grid.children[i] || null);
-    const aw = activeWin(s);
-    const rp = aw.panes.find((x) => x.running && x.active) || aw.panes.find((x) => x.running); // Stop targets the pane that runs something
-    const hasRun = s.windows.some((w) => w.running);
-    const asks = s.windows.filter((w) => w.prompt);
-    card.classList.toggle('has-run', hasRun);
-    card.classList.toggle('has-ask', asks.length > 0);
-    const sig = JSON.stringify([s.windows, s.attached, ago(s.activity)]);
-    if (card.dataset.sig === sig) return;
-    card.dataset.sig = sig;
-    const st = S.stats?.sessions[s.name];
-    $('.card-h', card).innerHTML = `<span class="dot ${hasRun ? 'run' : ''}"></span><h3>${esc(s.name)}</h3>
-      ${aw.branch ? `<span class="branch" title="git branch">⎇ ${esc(aw.branch)}</span>` : ''}
-      <span class="when">${s.attached ? `<span class="att">${s.attached} viewing</span> · ` : ''}${ago(s.activity)}</span>`;
-    $('.wins', card).innerHTML = s.windows.map((w) => `<button class="win ${w.active ? 'active' : ''}" data-w="${w.index}" title="${esc(w.cmd)}">
-      <span class="dot ${w.prompt ? 'ask-dot' : winState(w)}"></span>${esc(w.name)}${w.panes.length > 1 ? `<span class="c">${w.panes.length} panes</span>` : w.running ? `<span class="c">${esc(w.cmd)}</span>` : ''}</button>`).join('');
-    $('.asks', card).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
-    $('.path', card).textContent = home(aw.cwd);
-    $('.card-f', card).innerHTML = `<button class="btn sm primary" data-a="open">Open</button>
-      ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}">Stop ${esc(rp.cmd)}</button>`
-        : aw.preset ? `<button class="btn sm run" data-a="start" title="${esc(aw.preset)}">Start ${esc(aw.preset.split(' ')[0])}</button>` : ''}
-      <span class="use">${st ? `${Math.round(st.cpu)}% CPU · ${bytes(st.rss)}` : ''}</span>
-      <button class="btn sm ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">⋯</button>`;
-  });
+  }
+  const keep = new Set(nodes);
+  for (const c of [...grid.children]) if (!keep.has(c)) c.remove();
+  nodes.forEach((n, i) => { if (grid.children[i] !== n) grid.insertBefore(n, grid.children[i] || null); });
+}
+
+function headerFor(p, sessions) {
+  const grid = $('#grid');
+  let h = [...grid.children].find((x) => x.dataset.h === p.id);
+  if (!h) { h = document.createElement('div'); h.className = 'phead'; h.dataset.h = p.id; }
+  const runs = sessions.filter((s) => s.windows.some((w) => w.running)).length;
+  const asks = sessions.filter((s) => s.windows.some((w) => w.prompt)).length;
+  const open = !collapsed.has(p.id);
+  const sig = JSON.stringify([p, sessions.length, runs, asks, open]);
+  if (h.dataset.sig === sig) return h;
+  h.dataset.sig = sig;
+  h.classList.toggle('none', !p.id);
+  h.innerHTML = `<button class="pt" data-ptoggle aria-expanded="${open}"><span class="chev">${open ? '▾' : '▸'}</span>${p.id ? FOLDER : ''}<b>${esc(p.label)}</b>
+      <span class="pc">${sessions.length ? `${sessions.length} session${sessions.length > 1 ? 's' : ''}` : 'empty'}${runs ? ` · <i class="r">${runs} running</i>` : ''}${asks ? ` · <i class="q">${asks} waiting</i>` : ''}</span></button>
+    ${p.cwd ? `<span class="pd">${esc(home(p.cwd))}</span>` : ''}<span class="spacer"></span>
+    <button class="btn sm ghost" data-pnew title="New session in ${esc(p.label)}" aria-label="New session in ${esc(p.label)}">+<span class="lbl"> Session</span></button>
+    ${p.id ? `<button class="btn sm ghost icon" data-pmore aria-haspopup="menu" aria-label="Project actions for ${esc(p.label)}">⋯</button>` : ''}`;
+  return h;
+}
+
+function cardFor(s) {
+  const grid = $('#grid');
+  let card = grid.querySelector(`.card[data-s="${CSS.escape(s.name)}"]`);
+  if (!card) {
+    card = document.createElement('article');
+    card.className = 'card';
+    card.dataset.s = s.name;
+    card.draggable = !touch;
+    card.innerHTML = `<div class="card-h"></div><div class="wins"></div><div class="asks"></div>
+      <div class="screen" role="button" tabindex="0" aria-label="Open ${esc(s.name)}"><span class="path"></span><pre></pre></div>
+      <div class="card-f"></div>`;
+    $('pre', card).textContent = S.previews[s.name] ?? '';
+  }
+  const aw = activeWin(s);
+  const rp = aw.panes.find((x) => x.running && x.active) || aw.panes.find((x) => x.running); // Stop targets the pane that runs something
+  const hasRun = s.windows.some((w) => w.running);
+  const asks = s.windows.filter((w) => w.prompt);
+  card.classList.toggle('has-run', hasRun);
+  card.classList.toggle('has-ask', asks.length > 0);
+  const sig = JSON.stringify([s.windows, s.attached, ago(s.activity)]);
+  if (card.dataset.sig === sig) return card;
+  card.dataset.sig = sig;
+  const st = S.stats?.sessions[s.name];
+  $('.card-h', card).innerHTML = `<span class="dot ${hasRun ? 'run' : ''}"></span><h3>${esc(s.name)}</h3>
+    ${aw.branch ? `<span class="branch" title="git branch">⎇ ${esc(aw.branch)}</span>` : ''}
+    <span class="when">${s.attached ? `<span class="att">${s.attached} viewing</span> · ` : ''}${ago(s.activity)}</span>`;
+  $('.wins', card).innerHTML = s.windows.map((w) => `<button class="win ${w.active ? 'active' : ''}" data-w="${w.index}" title="${esc(w.cmd)}">
+    <span class="dot ${w.prompt ? 'ask-dot' : winState(w)}"></span>${esc(w.name)}${w.panes.length > 1 ? `<span class="c">${w.panes.length} panes</span>` : w.running ? `<span class="c">${esc(w.cmd)}</span>` : ''}</button>`).join('');
+  $('.asks', card).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
+  $('.path', card).textContent = home(aw.cwd);
+  $('.card-f', card).innerHTML = `<button class="btn sm primary" data-a="open">Open</button>
+    ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}">Stop ${esc(rp.cmd)}</button>`
+      : aw.preset ? `<button class="btn sm run" data-a="start" title="${esc(aw.preset)}">Start ${esc(aw.preset.split(' ')[0])}</button>` : ''}
+    <span class="use">${st ? `${Math.round(st.cpu)}% CPU · ${bytes(st.rss)}` : ''}</span>
+    <button class="btn sm ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">⋯</button>`;
+  return card;
 }
 
 $('#grid').addEventListener('click', async (e) => {
+  const ph = e.target.closest('.phead');
+  if (ph) return projectAction(e, ph.dataset.h);
   const card = e.target.closest('.card'); if (!card) return;
   const s = findSess(card.dataset.s); if (!s) return;
   const ask = e.target.closest('.ask [data-n]');
@@ -127,6 +168,7 @@ $('#grid').addEventListener('click', async (e) => {
       await act(`/api/sessions/${encodeURIComponent(s.name)}/windows`, { preset: p.id }); toast(`Opened ${p.label}`); refresh();
     })) },
     ...(aw.branch ? [{ label: 'Changes', icon: '±', run: () => openChanges(activePane(aw).cwd) }] : []),
+    { label: 'Move to project', icon: '▤', run: () => menu(e.target.closest('button'), moveItems([s.name], projectOf(s))) },
     { label: 'Rename', icon: '✎', run: async () => {
       const to = prompt('Rename session (letters, digits, - _ .)', s.name);
       if (to && to !== s.name) { await act(`/api/sessions/${encodeURIComponent(s.name)}/rename`, { to }); refresh(); }
@@ -138,6 +180,77 @@ $('#grid').addEventListener('click', async (e) => {
     } },
   ]);
 });
+async function moveTo(names, project) {
+  for (const n of names) await act(`/api/sessions/${encodeURIComponent(n)}/project`, { project });
+  const p = S.projects.find((x) => x.id === project);
+  toast(names.length === 1 ? `Moved ${names[0]} to ${p ? p.label : 'No project'}` : `Moved ${names.length} sessions`);
+  collapsed.delete(project); store.set('collapsed', [...collapsed]);
+  refresh();
+}
+const moveItems = (names, cur) => [
+  ...S.projects.map((p) => ({ label: p.label, icon: '▤', checked: p.id === cur, run: () => moveTo(names, p.id) })),
+  { label: 'No project', icon: ' ', checked: !cur, run: () => moveTo(names, '') },
+  '-',
+  { label: 'New project…', icon: '+', run: async () => { const p = await newProject(); if (p) moveTo(names, p.id); } },
+];
+
+export async function saveProjects(list) {
+  S.projects = await act('/api/config/projects', list, 'PUT');
+  renderWall();
+}
+export async function newProject() {
+  const label = prompt('Project name')?.trim().slice(0, 40); if (!label) return null;
+  const cwd = prompt('Default folder for its sessions (optional)', '~/')?.trim();
+  const base = label.toLowerCase().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 56) || 'project';
+  let id = base, n = 2; while (S.projects.some((p) => p.id === id)) id = `${base}-${n++}`;
+  const p = { id, label, ...(cwd && cwd !== '~/' ? { cwd } : {}) };
+  await saveProjects([...S.projects, p]);
+  return p;
+}
+
+function projectAction(e, id) {
+  const p = S.projects.find((x) => x.id === id) || { id: '', label: 'No project' };
+  if (e.target.closest('[data-ptoggle]')) {
+    collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+    store.set('collapsed', [...collapsed]); return renderWall();
+  }
+  if (e.target.closest('[data-pnew]')) return openNew('session', null, id);
+  if (!e.target.closest('[data-pmore]')) return;
+  const edit = (patch) => saveProjects(S.projects.map((x) => x.id === id ? { ...x, ...patch } : x));
+  const i = S.projects.indexOf(p);
+  menu(e.target.closest('button'), [
+    { label: 'Rename', icon: '✎', run: () => { const l = prompt('Project name', p.label)?.trim(); if (l) edit({ label: l.slice(0, 40) }); } },
+    { label: 'Default folder', icon: '…', sub: p.cwd ? home(p.cwd) : 'none', run: () => {
+      const c = prompt('Default folder for new sessions (empty for none)', p.cwd || ''); if (c == null) return;
+      const { cwd, ...rest } = p; saveProjects(S.projects.map((x) => x.id === id ? { ...rest, ...(c.trim() ? { cwd: c.trim() } : {}) } : x));
+    } },
+    { label: 'Move up', icon: '↑', disabled: i === 0, run: () => { const l = [...S.projects]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; saveProjects(l); } },
+    { label: 'Move down', icon: '↓', disabled: i === S.projects.length - 1, run: () => { const l = [...S.projects]; [l[i + 1], l[i]] = [l[i], l[i + 1]]; saveProjects(l); } },
+    '-',
+    { label: 'Delete project', icon: '✕', danger: true, run: async () => {
+      const inside = S.sessions.filter((s) => s.project === id);
+      if (!confirm(`Delete project "${p.label}"?${inside.length ? ` Its ${inside.length} session${inside.length > 1 ? 's keep' : ' keeps'} running under No project.` : ''}`)) return;
+      for (const s of inside) await act(`/api/sessions/${encodeURIComponent(s.name)}/project`, { project: '' }).catch(() => {});
+      await saveProjects(S.projects.filter((x) => x.id !== id)); refresh();
+    } },
+  ]);
+}
+$('#btn-project').addEventListener('click', () => newProject());
+
+// desktop: drag a card onto a project heading
+$('#grid').addEventListener('dragstart', (e) => { const c = e.target.closest('.card'); if (c) e.dataTransfer.setData('text/x-tmuxlab-session', c.dataset.s); });
+$('#grid').addEventListener('dragover', (e) => {
+  const h = e.target.closest('.phead');
+  if (h && e.dataTransfer.types.includes('text/x-tmuxlab-session')) { e.preventDefault(); h.classList.add('drop'); }
+});
+$('#grid').addEventListener('dragleave', (e) => e.target.closest('.phead')?.classList.remove('drop'));
+$('#grid').addEventListener('drop', (e) => {
+  const h = e.target.closest('.phead'); if (!h) return;
+  e.preventDefault(); h.classList.remove('drop');
+  const name = e.dataTransfer.getData('text/x-tmuxlab-session');
+  if (name && projectOf(findSess(name) || {}) !== h.dataset.h) moveTo([name], h.dataset.h);
+});
+
 $('#grid').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.classList.contains('screen')) openTerm(e.target.closest('.card').dataset.s);
 });

@@ -7,14 +7,17 @@ import { start } from './main.js';
 // ---------- new session / window ----------
 const dNew = $('#dlg-new');
 let nw = { mode: 'session', pick: 'p:shell', session: null, nameTouched: false, git: false };
-export function openNew(mode = 'session', session = null) {
+export function openNew(mode = 'session', session = null, project = '') {
   nw = { mode, session, pick: nw.pick, nameTouched: false, git: false };
+  $('#new-project-row').hidden = mode !== 'session' || !S.projects.length;
+  $('#new-project').innerHTML = '<option value="">No project</option>' + S.projects.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+  $('#new-project').value = project;
   $('#new-title').textContent = mode === 'session' ? 'New session' : `New window in ${session}`;
   $('#new-name-row').hidden = mode !== 'session';
   $('#new-go').textContent = mode === 'session' ? 'Start session' : 'Open window';
   $('#new-name').value = '';
   const s = session && findSess(session);
-  $('#new-cwd').value = s ? activePane(activeWin(s)).cwd : '';
+  $('#new-cwd').value = s ? activePane(activeWin(s)).cwd : projDir(project);
   $('#browser').hidden = true;
   const chip = (key, icon, label, sub, cls = '') => `<button type="button" class="preset ${cls}" data-k="${esc(key)}" aria-pressed="${key === nw.pick}">
     <span class="ic">${esc(icon)}</span><span>${esc(label)}<small>${esc(sub)}</small></span></button>`;
@@ -25,13 +28,20 @@ export function openNew(mode = 'session', session = null) {
   $('#recent').innerHTML = store.get('recent', []).map((d) => `<button type="button" data-d="${esc(d)}">${esc(home(d))}</button>`).join('');
   $('#wt-row').hidden = true; $('#wt-on').checked = false; $('#wt-branch').hidden = true;
   dNew.showModal();
-  if (s) checkGit(); // eslint-disable-line
+  if (s || $('#new-cwd').value) checkGit();
+  if (!s && $('#new-cwd').value && !nw.nameTouched) setCwd($('#new-cwd').value);
   (mode === 'session' && !touch ? $('#new-name') : $('#new-cwd')).focus();
 }
 $('#new-presets').addEventListener('click', (e) => {
   const b = e.target.closest('.preset'); if (!b) return;
   nw.pick = b.dataset.k;
   for (const x of $('#new-presets').children) x.setAttribute('aria-pressed', x === b);
+});
+const projDir = (id) => S.projects.find((p) => p.id === id)?.cwd || '';
+// picking a project fills in its folder unless you already chose one
+$('#new-project').addEventListener('change', (e) => {
+  const cur = $('#new-cwd').value.trim();
+  if (!cur || S.projects.some((p) => p.cwd === cur)) { const d = projDir(e.target.value); if (d) setCwd(d); }
 });
 $('#new-name').addEventListener('input', () => { nw.nameTouched = true; suggestBranch(); });
 function setCwd(d, git) {
@@ -85,7 +95,8 @@ $('#new-form').addEventListener('submit', async (e) => {
   try {
     if (nw.mode === 'session') {
       const wt = !$('#wt-row').hidden && $('#wt-on').checked ? { worktree: { branch: $('#wt-branch').value.trim() } } : {};
-      const r = await act('/api/sessions', { name: $('#new-name').value.trim() || undefined, cwd, ...what, ...wt });
+      const project = $('#new-project').value || undefined;
+      const r = await act('/api/sessions', { name: $('#new-name').value.trim() || undefined, cwd, project, ...what, ...wt });
       dNew.close(); remember(cwd); if (wt.worktree) toast(`Branch ${wt.worktree.branch} in ${home(r.cwd)}`);
       await refresh(); openTerm(r.name);
     } else {
@@ -214,7 +225,7 @@ function renderPal() {
   const go = (s, w) => pal.pick ? () => pal.pick(s, w) : async () => { if (w != null) await act(`${W(s, w)}/select`); openTerm(s); };
   pal.items = [
     ...S.sessions.flatMap((s) => [
-      ...(pal.pick ? [] : [{ label: s.name, meta: `${s.windows.length} windows`, dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
+      ...(pal.pick ? [] : [{ label: s.name, meta: `${S.projects.find((p) => p.id === s.project)?.label ?? ''} ${s.windows.length} windows`.trim(), dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
       ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: w.running ? w.cmd : home(w.cwd), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
     ]),
     ...(pal.pick ? [] : [{ label: 'New session…', meta: '', go: () => openNew() }, { label: 'Schedules', meta: '', go: openSchedules }, { label: 'Settings', meta: '', go: openSettings }]),
