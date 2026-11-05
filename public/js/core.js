@@ -11,7 +11,7 @@ export const touch = matchMedia('(pointer: coarse)').matches;
 
 export const S = {
   machines: store.get('machines', null), cur: store.get('cur', 0),
-  sessions: [], presets: [], stacks: [], projects: [], stats: null, info: null, filter: 'all', previews: {},
+  sessions: [], presets: [], stacks: [], projects: [], stats: null, info: null, filter: store.get('filter', 'all'), previews: {},
 };
 // tmuxlab 1.0/1.1 kept a single {base, token}
 if (!S.machines) { const old = store.get('cfg', null); S.machines = old ? [{ name: '', ...old }] : []; }
@@ -39,18 +39,26 @@ export async function api(path, { method = 'GET', body, raw, m = cfg(), timeout 
 export const act = (p, body, method = 'POST') => api(p, { method, body }).catch((e) => { toast(e.message, true); throw e; });
 export const W = (s, i) => `/api/windows/${encodeURIComponent(s)}/${i}`;
 
+export const icon = (n, cls = 'ico') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+
+// toasts are polite (never take focus), dismissable, and stay longer when they carry an action
 export function toast(msg, bad, { action, run } = {}) {
   const t = document.createElement('div');
   t.className = 'toast' + (bad ? ' bad' : '');
-  t.textContent = msg;
+  if (bad) t.setAttribute('role', 'alert'); // the container is already a polite live region
+  const span = document.createElement('span'); span.textContent = msg; t.append(span);
+  const gone = () => { t.classList.add('out'); setTimeout(() => t.remove(), 140); };
   if (action) {
     const b = document.createElement('button');
     b.className = 'btn sm'; b.textContent = action;
-    b.onclick = () => { t.remove(); run(); };
+    b.onclick = () => { gone(); run(); };
     t.append(b);
   }
+  const x = document.createElement('button');
+  x.className = 'btn sm ghost icon'; x.setAttribute('aria-label', 'Dismiss'); x.innerHTML = icon('x'); x.onclick = gone;
+  t.append(x);
   $('#toasts').append(t);
-  setTimeout(() => t.remove(), action ? 8000 : bad ? 5000 : 2500);
+  setTimeout(gone, action ? 8000 : bad ? 6000 : 3000);
 }
 
 export function show(id) { for (const v of $$('.view')) v.hidden = v.id !== id; }
@@ -67,27 +75,121 @@ export const findSess = (n) => S.sessions.find((s) => s.name === n);
 export const activePane = (w) => w.panes?.find((p) => p.active) || w.panes?.[0] || w;
 export const vibrate = () => { if (touch) navigator.vibrate?.(6); };
 
+// Android Back / browser back closes the top overlay first. Each open overlay owns one history entry.
+const stack = []; let ownBacks = 0, backTimer; const waiters = [];
+const flush = () => { ownBacks = 0; clearTimeout(backTimer); waiters.splice(0).forEach((f) => f()); };
+export function onBack(close) {
+  const e = { close }; stack.push(e);
+  // a menu that opens a dialog closes first: wait for that history.back() before pushing
+  afterNav(() => { if (stack.includes(e)) { history.pushState({ ...history.state, ov: stack.indexOf(e) + 1 }, ''); e.pushed = true; } });
+  return () => {
+    const i = stack.indexOf(e); if (i < 0) return;
+    stack.splice(i, 1);
+    if (!e.pushed) return;
+    ownBacks++; history.back();
+    clearTimeout(backTimer); backTimer = setTimeout(flush, 500); // never wait forever on a traversal the browser dropped
+  };
+}
+// run fn once our own history.back() calls have landed, so a new pushState isn't popped by them
+export const afterNav = (fn) => ownBacks ? waiters.push(fn) : fn();
+addEventListener('popstate', (e) => {
+  if (ownBacks) { if (!--ownBacks) flush(); e.stopImmediatePropagation(); return; }
+  const depth = history.state?.ov || 0;
+  const had = stack.length;
+  while (stack.length > depth) stack.pop().close();
+  if (had > depth || stack.length < depth) e.stopImmediatePropagation(); // Back only closed an overlay
+});
+const showModal = HTMLDialogElement.prototype.showModal;
+HTMLDialogElement.prototype.showModal = function () {
+  showModal.call(this);
+  const release = onBack(() => this.close());
+  this.addEventListener('close', release, { once: true });
+};
+// tap outside a dialog closes it (only when the press also started outside, so text selection is safe)
+let downOn = null;
+document.addEventListener('pointerdown', (e) => { downOn = e.target; });
+document.addEventListener('click', (e) => {
+  const d = e.target;
+  if (!(d instanceof HTMLDialogElement) || downOn !== d || d.id === 'dlg-ask') return;
+  const r = d.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close();
+});
+
 // popup menu anchored to an element; items: {label, icon, run, checked, danger, sub}
+// keyboard: arrows/Home/End move, Esc/Tab close, focus returns to the anchor
 let closeFn = null;
 export function menu(anchor, items) {
-  closeMenu();
+  closeMenu(false);
   const m = document.createElement('div');
   m.className = 'menu'; m.setAttribute('role', 'menu');
-  m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : `<button role="menuitem" data-i="${i}" class="${it.danger ? 'danger' : ''}" ${it.disabled ? 'disabled' : ''}>
-    <span class="mi">${esc(it.checked ? '✓' : it.icon || '')}</span><span>${esc(it.label)}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('');
+  m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : `<button role="${it.checked !== undefined ? 'menuitemradio' : 'menuitem'}" data-i="${i}" class="${it.danger ? 'danger' : ''}" ${it.disabled ? 'disabled' : ''} ${it.checked !== undefined ? `aria-checked="${!!it.checked}"` : ''}>
+    <span class="mi" aria-hidden="true">${esc(it.checked ? '✓' : it.icon || '')}</span><span>${esc(it.label)}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('');
   document.body.append(m);
   const r = anchor.getBoundingClientRect();
   m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + 'px';
   m.style.top = Math.max(8, r.bottom + m.offsetHeight + 8 > innerHeight ? r.top - m.offsetHeight - 4 : r.bottom + 4) + 'px';
-  m.addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) { closeMenu(); items[b.dataset.i].run?.(); } });
-  m.querySelector('button:not([disabled])')?.focus({ preventScroll: true });
-  const outside = (e) => { if (!m.contains(e.target)) closeMenu(); };
+  const btns = () => $$('button:not([disabled])', m);
+  m.addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) { closeMenu(false); items[b.dataset.i].run?.(); } });
+  m.addEventListener('keydown', (e) => {
+    const l = btns(), i = l.indexOf(document.activeElement);
+    const to = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: l.length - 1 }[e.key];
+    if (to !== undefined) { e.preventDefault(); l[(to + l.length) % l.length]?.focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); }
+    else if (e.key === 'Tab') closeMenu();
+  });
+  btns()[0]?.focus({ preventScroll: true });
+  anchor.setAttribute('aria-expanded', 'true');
+  const outside = (e) => { if (!m.contains(e.target)) closeMenu(false); };
   setTimeout(() => document.addEventListener('pointerdown', outside), 0);
-  closeFn = () => { m.remove(); document.removeEventListener('pointerdown', outside); };
+  const finish = (refocus) => {
+    m.remove(); document.removeEventListener('pointerdown', outside); anchor.setAttribute('aria-expanded', 'false'); closeFn = null;
+    if (refocus && anchor.isConnected) anchor.focus({ preventScroll: true });
+  };
+  const release = onBack(() => finish(false));
+  closeFn = (refocus = true) => { finish(refocus); release(); };
   return m;
 }
-export function closeMenu() { closeFn?.(); closeFn = null; }
+export function closeMenu(refocus) { closeFn?.(refocus); }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+// In-app replacement for prompt()/confirm(): labelled, validated inline, and closable with Back.
+// With `label` it asks for text and resolves the string (or null); without, it resolves true/false.
+export function ask({ title, message = '', label, value = '', placeholder = '', help = '', ok = 'OK', danger = false, validate }) {
+  const d = $('#dlg-ask'), inp = $('#ask-i'), err = $('#ask-e'), okb = $('#ask-ok');
+  const text = label !== undefined;
+  $('#ask-t').textContent = title;
+  $('#ask-m').textContent = message; $('#ask-m').hidden = !message;
+  $('#ask-field').hidden = !text;
+  $('#ask-l').textContent = label || '';
+  $('#ask-h').textContent = help; $('#ask-h').hidden = !help;
+  inp.value = value; inp.placeholder = placeholder; inp.removeAttribute('aria-invalid');
+  err.textContent = '';
+  okb.textContent = ok; okb.className = danger ? 'btn danger solid' : 'btn primary';
+  return new Promise((res) => {
+    const onSubmit = (e) => {
+      if (e.submitter?.value !== 'ok' || !text) return;
+      const msg = validate?.(inp.value.trim());
+      if (msg) { e.preventDefault(); err.textContent = msg; inp.setAttribute('aria-invalid', 'true'); inp.focus(); }
+    };
+    d.addEventListener('submit', onSubmit);
+    d.addEventListener('close', () => {
+      d.removeEventListener('submit', onSubmit);
+      const yes = d.returnValue === 'ok';
+      res(text ? (yes ? inp.value.trim() : null) : yes);
+    }, { once: true });
+    d.returnValue = '';
+    d.showModal();
+    if (text) { inp.focus(); inp.select(); } else (danger ? $('#ask-cancel') : okb).focus();
+  });
+}
+export const NAME_RULE = (v) => !v ? 'Enter a name.' : /^[\w.-]{1,64}$/.test(v) ? '' : 'Use letters, digits, - _ or . (up to 64 characters).';
+
+// show a button as busy while its action runs, so it can't be pressed twice
+export async function busy(btn, fn) {
+  if (btn?.getAttribute('aria-busy') === 'true') return;
+  btn?.setAttribute('aria-busy', 'true');
+  try { return await fn(); } finally { btn?.removeAttribute('aria-busy'); }
+}
 
 export const presetItems = (pick) => S.presets.map((p) => ({ label: p.label, icon: p.icon || '❯', sub: p.cmd || 'shell', run: () => pick(p) }));
 

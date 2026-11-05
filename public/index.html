@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#0E1A1C">
+<meta name="theme-color" content="#0A1220">
 <title>tmuxlab</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -13,6 +13,23 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="m2 2 20 20M8.5 16.5a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 5.2-2.7M19 12.9a10 10 0 0 0-2.2-1.6M2 8.8a15 15 0 0 1 4.2-2.6M22 8.8A15 15 0 0 0 11 5"/><path d="M12 20h.01"/></symbol>
+  </defs>
+</svg>
 
 <!-- connect -->
 <section id="login" class="view" hidden>
@@ -20,8 +37,11 @@
     <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg>
     <h1 id="login-title">Connect to a machine</h1>
     <p>Paste the link the server printed when it started, or enter the address and token.</p>
-    <label>Link or server address<input id="login-url" placeholder="192.168.x.x:7681 or the full link" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
-    <label>Token<input id="login-token" type="password" placeholder="From ~/.config/tmuxlab/token" autocomplete="off"></label>
+    <label>Link or server address<input id="login-url" inputmode="url" placeholder="192.168.x.x:7681 or the full link" autocomplete="url" autocapitalize="off" spellcheck="false" required></label>
+    <label>Token
+      <span class="secret"><input id="login-token" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" aria-describedby="login-token-h">
+        <button type="button" class="btn ghost icon sm" id="login-show" aria-label="Show token" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg></button></span>
+      <span class="help" id="login-token-h">On the server: <code>cat ~/.config/tmuxlab/token</code></span></label>
     <p id="login-err" class="err" role="alert"></p>
     <button class="btn primary">Connect</button>
     <div class="saved" id="login-saved" hidden></div>
@@ -33,22 +53,25 @@
   <header class="topbar">
     <button class="brand" id="machine" aria-haspopup="menu" title="Switch machine">
       <svg class="mark sm" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="8" width="56" height="48" rx="6"/><path d="M4 44h56M32 8v36"/><path class="lit" d="M12 20l6 5-6 5"/></svg>
-      <span id="machine-name">tmuxlab</span><span class="caret">▾</span></button>
-    <div class="stats" id="stats" aria-live="polite"></div>
+      <span id="machine-name">tmuxlab</span><svg class="ico" aria-hidden="true"><use href="#i-down"/></svg></button>
+    <div class="stats" id="stats"></div>
     <div class="actions">
-      <button class="btn ghost icon" id="btn-palette" title="Jump to (Ctrl+K)" aria-label="Jump to session">⌕</button>
-      <button class="btn ghost icon" id="btn-sched" title="Schedules" aria-label="Schedules">◷</button>
-      <button class="btn ghost icon" id="btn-settings" title="Settings" aria-label="Settings">⚙</button>
-      <button class="btn primary" id="btn-new" aria-label="New session"><span aria-hidden="true" class="plus">+</span><span class="lbl">New session</span></button>
+      <button class="btn ghost icon" id="btn-palette" title="Jump to (Ctrl+K)" aria-label="Jump to session"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg></button>
+      <button class="btn ghost icon" id="btn-sched" title="Schedules" aria-label="Schedules"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg></button>
+      <button class="btn ghost icon" id="btn-settings" title="Settings" aria-label="Settings"><svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg></button>
+      <button class="btn primary" id="btn-new" aria-label="New session"><svg class="ico plus" aria-hidden="true"><use href="#i-plus"/></svg><span class="lbl">New session</span></button>
     </div>
   </header>
-  <div class="filters" id="filters" role="tablist">
-    <button role="tab" data-f="all" aria-selected="true">All</button>
-    <button role="tab" data-f="running">Running</button>
-    <button role="tab" data-f="waiting">Needs you</button>
-    <button role="tab" data-f="idle">Idle</button>
+  <div class="offline" id="offline" role="alert" hidden><svg class="ico" aria-hidden="true"><use href="#i-wifi-off"/></svg><span id="offline-msg">Can't reach this machine. Showing the last known state.</span><button class="btn sm" id="offline-retry">Retry</button></div>
+  <div class="filters">
+    <div id="filters" role="tablist" aria-label="Show sessions">
+      <button role="tab" data-f="all" aria-selected="true">All</button>
+      <button role="tab" data-f="running" aria-selected="false">Running</button>
+      <button role="tab" data-f="waiting" aria-selected="false">Needs you</button>
+      <button role="tab" data-f="idle" aria-selected="false">Idle</button>
+    </div>
     <span class="spacer"></span>
-    <button class="btn sm ghost" id="btn-project" role="none">+ Project</button>
+    <button class="btn sm ghost" id="btn-project" aria-label="New project"><svg class="ico" aria-hidden="true"><use href="#i-folder"/></svg><span class="lbl">New project</span></button>
   </div>
   <main id="grid" class="grid"></main>
   <div id="empty" class="empty" hidden>
@@ -61,12 +84,12 @@
 <!-- terminal -->
 <section id="term" class="view" hidden>
   <header class="termbar">
-    <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions">‹</button>
+    <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions"><svg class="ico" aria-hidden="true"><use href="#i-left"/></svg></button>
     <button class="sname" id="t-name" title="Rename session"></button>
     <nav class="tabs" id="t-tabs" aria-label="Windows"></nav>
-    <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window">+</button>
-    <button class="btn ghost icon" id="btn-split" aria-label="Show another window beside this one" title="Split view">⊞</button>
-    <span class="conn" id="t-conn" title="Connection"></span>
+    <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
+    <button class="btn ghost icon" id="btn-split" aria-label="Show another window beside this one" title="Split view"><svg class="ico" aria-hidden="true"><use href="#i-columns"/></svg></button>
+    <span class="conn" id="t-conn" role="status"><span class="sr-only" id="t-conn-l">Connecting</span></span>
   </header>
   <div class="wbar" id="t-wbar">
     <button class="btn sm" id="w-toggle"></button>
@@ -88,7 +111,7 @@
   <form class="compose" id="compose">
     <button type="button" class="btn ghost icon" id="attach" aria-label="Attach a file or photo" title="Attach a file or photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/></svg></button>
     <input type="file" id="attach-file" multiple hidden>
-    <textarea id="compose-text" rows="1" placeholder="Type or paste, Enter to send" autocapitalize="off" spellcheck="false" aria-label="Send text to terminal"></textarea>
+    <textarea id="compose-text" rows="1" placeholder="Type or paste" title="Enter sends, Shift+Enter adds a line" autocapitalize="off" spellcheck="false" aria-label="Send text to terminal"></textarea>
     <button class="btn primary" aria-label="Send">Send</button>
   </form>
 </section>
@@ -122,7 +145,7 @@
 <!-- changes -->
 <dialog id="dlg-changes" class="sheet wide">
   <div class="sheet-in">
-    <div class="row"><h2 id="ch-title">Changes</h2><span class="spacer"></span><button class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="row"><h2 id="ch-title">Changes</h2><span class="spacer"></span><button class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
     <p class="muted mono" id="ch-sub"></p>
     <div class="ch-body" id="ch-body"></div>
     <textarea id="ch-msg" rows="2" placeholder="Commit message" spellcheck="true" aria-label="Commit message"></textarea>
@@ -139,12 +162,12 @@
 <!-- find & copy -->
 <dialog id="dlg-find" class="sheet wide find">
   <div class="sheet-in">
-    <div class="row"><h2 id="find-title"></h2><span class="spacer"></span><button class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="row"><h2 id="find-title"></h2><span class="spacer"></span><button class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
     <div class="row">
       <input id="find-q" placeholder="Find in output" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Find in output">
       <span class="muted nowrap" id="find-n"></span>
-      <button class="btn sm ghost" id="find-prev" aria-label="Previous match">↑</button>
-      <button class="btn sm ghost" id="find-next" aria-label="Next match">↓</button>
+      <button class="btn sm ghost" id="find-prev" aria-label="Previous match"><svg class="ico" aria-hidden="true"><use href="#i-up"/></svg></button>
+      <button class="btn sm ghost" id="find-next" aria-label="Next match"><svg class="ico" aria-hidden="true"><use href="#i-down"/></svg></button>
       <button class="btn sm" id="find-copy">Copy</button>
     </div>
     <pre id="find-pre" class="find-pre"></pre>
@@ -154,7 +177,7 @@
 <!-- schedules -->
 <dialog id="dlg-sched" class="sheet wide">
   <div class="sheet-in">
-    <div class="row"><h2>Schedules</h2><span class="spacer"></span><button class="btn sm primary" id="sch-add">Add schedule</button><button class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="row"><h2>Schedules</h2><span class="spacer"></span><button class="btn sm primary" id="sch-add">Add schedule</button><button class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
     <ul class="sch-list" id="sch-list"></ul>
     <div class="sch-form" id="sch-form" hidden>
       <label>Name<input id="sf-label" placeholder="Nightly tests" autocomplete="off"></label>
@@ -183,7 +206,7 @@
 <!-- settings -->
 <dialog id="dlg-settings" class="sheet wide">
   <form method="dialog" id="settings-form">
-    <div class="row"><h2>Settings</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="row"><h2>Settings</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
     <p class="muted mono" id="set-server"></p>
     <div class="seg" id="set-tabs" role="tablist">
       <button type="button" role="tab" data-tab="alerts">Phone alerts</button>
@@ -228,6 +251,17 @@
 <dialog id="dlg-palette" class="palette">
   <input id="pal-q" placeholder="Jump to session or window…" autocomplete="off" aria-label="Search sessions">
   <ul id="pal-list" role="listbox"></ul>
+</dialog>
+
+<!-- in-app prompt / confirm -->
+<dialog id="dlg-ask" class="sheet ask-dlg" aria-labelledby="ask-t" aria-describedby="ask-m">
+  <form method="dialog" class="sheet-in" novalidate>
+    <h2 id="ask-t"></h2>
+    <p id="ask-m"></p>
+    <label id="ask-field"><span id="ask-l"></span><input id="ask-i" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="ask-h ask-e"><span class="help" id="ask-h"></span></label>
+    <p class="err" id="ask-e" role="alert"></p>
+    <div class="row end"><button type="button" class="btn ghost" id="ask-cancel" data-close>Cancel</button><button class="btn primary" value="ok" id="ask-ok">OK</button></div>
+  </form>
 </dialog>
 
 <div id="toasts" aria-live="polite"></div>

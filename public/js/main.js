@@ -1,5 +1,5 @@
 // Boot: connect to the current machine, then poll.
-import { $, esc, S, api, cfg, saveMachines, show, isApp, Unauthorized } from './core.js';
+import { $, esc, S, api, cfg, saveMachines, show, isApp, Unauthorized, busy } from './core.js';
 import { refresh, refreshPreviews, refreshStats } from './wall.js';
 import { closeTerm } from './term.js';
 import './sheets.js';
@@ -27,8 +27,13 @@ function showLogin(err, adding = false) {
 export const addMachine = () => { stop(); $('#login-url').value = ''; $('#login-token').value = ''; showLogin('', true); };
 $('#login-saved').addEventListener('click', (e) => { const b = e.target.closest('[data-m]'); if (b) { S.cur = +b.dataset.m; saveMachines(); start(); } });
 
-$('#login-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
+$('#login-show').addEventListener('click', (e) => {
+  const on = $('#login-token').type === 'password';
+  $('#login-token').type = on ? 'text' : 'password';
+  e.currentTarget.setAttribute('aria-pressed', on); e.currentTarget.setAttribute('aria-label', on ? 'Hide token' : 'Show token');
+});
+$('#login-form').addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter || $('#login-form .btn.primary'), connect); });
+async function connect() {
   let raw = $('#login-url').value.trim(), token = $('#login-token').value.trim();
   const m = raw.match(/#token=([\w-]+)/);
   if (m) { token = m[1]; raw = raw.slice(0, raw.indexOf('#')); }
@@ -53,7 +58,7 @@ $('#login-form').addEventListener('submit', async (e) => {
   } catch (err) {
     $('#login-err').textContent = err instanceof Unauthorized ? err.message : `Could not reach ${base}. Check the server is running and this device can reach it.`;
   }
-});
+}
 
 let pollers = [];
 const stop = () => { pollers.forEach(clearInterval); pollers = []; };

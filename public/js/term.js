@@ -1,12 +1,13 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
-import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow } from './sheets.js';
 
 export const THEMES = {
-  ink: { background: '#081113', foreground: '#D8E4E1', cursor: '#F2C14E', selectionBackground: '#5EE6C355',
-    black: '#0E1A1C', brightBlack: '#4C6461', red: '#FF7A6B', green: '#5EE6C3', yellow: '#F2C14E', blue: '#6CB6FF',
-    magenta: '#D6A2FF', cyan: '#62D7E6', white: '#D8E4E1', brightWhite: '#FFFFFF' },
+  ink: { background: '#070D18', foreground: '#E2E9F6', cursor: '#5B9BFF', cursorAccent: '#070D18', selectionBackground: '#5B9BFF55',
+    black: '#0A1220', brightBlack: '#6178AB', red: '#FF7385', green: '#5BE3A6', yellow: '#FFB04C', blue: '#5B9BFF',
+    magenta: '#C79BFF', cyan: '#3FD8F2', white: '#C9D4E8', brightRed: '#FF9AA8', brightGreen: '#8CF0C2', brightYellow: '#FFCB80',
+    brightBlue: '#8DB8FF', brightMagenta: '#DDBFFF', brightCyan: '#86E8F8', brightWhite: '#FFFFFF' },
   dusk: { background: '#17141F', foreground: '#E6E1F0', cursor: '#FFB86B', selectionBackground: '#8A7CFF55',
     black: '#17141F', brightBlack: '#5F5873', red: '#FF6F91', green: '#7EE0A1', yellow: '#FFD36B', blue: '#8AB4FF',
     magenta: '#C792EA', cyan: '#7FDBCA', white: '#E6E1F0', brightWhite: '#FFFFFF' },
@@ -111,8 +112,11 @@ class Pane {
 
 function renderConn() {
   const p = focused(), c = $('#t-conn');
-  c.className = 'conn ' + (p?.conn ?? '');
-  c.title = { ok: 'Connected', wait: 'Connecting…', '': 'Disconnected' }[p?.conn ?? ''];
+  const st = p?.conn ?? '', l = $('#t-conn-l');
+  c.className = 'conn ' + st;
+  // the dot alone is colour; say it in words whenever something is wrong
+  l.textContent = { ok: 'Connected', wait: 'Reconnecting…', '': 'Offline' }[st];
+  l.className = st === 'ok' ? 'sr-only' : '';
 }
 
 function layout() {
@@ -133,7 +137,7 @@ function setFocus(i) {
 }
 
 export function openTerm(name, w) {
-  if ($('#term').hidden) history.pushState({ term: name }, '');
+  if ($('#term').hidden) afterNav(() => history.pushState({ term: name }, ''));
   for (const p of T.panes) p.dispose();
   T.panes = []; T.focus = 0;
   $('#wall').hidden = true; $('#term').hidden = false;
@@ -248,7 +252,7 @@ $('#t-tabs').addEventListener('click', async (e) => {
 $('#t-tabs').addEventListener('dblclick', async (e) => {
   const b = e.target.closest('.tab'); const p = focused(); if (!b || !p) return;
   const w = p.sess?.windows.find((x) => x.index == b.dataset.w);
-  const to = prompt('Rename window', w?.name); if (!to) return;
+  const to = await renameWin(w?.name); if (!to) return;
   await act(`${W(p.s, b.dataset.w)}/rename`, { to }); refresh();
 });
 // long-press a tab on touch screens: rename / move / close
@@ -257,12 +261,12 @@ $('#t-tabs').addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const idx = +b.dataset.w, wins = p.sess.windows, pos = wins.findIndex((x) => x.index === idx);
   menu(b, [
-    { label: 'Rename', icon: '✎', run: async () => { const to = prompt('Rename window', wins[pos].name); if (to) { await act(`${W(p.s, idx)}/rename`, { to }); refresh(); } } },
+    { label: 'Rename', icon: '✎', run: async () => { const to = await renameWin(wins[pos].name); if (to) { await act(`${W(p.s, idx)}/rename`, { to }); refresh(); } } },
     { label: 'Move left', icon: '←', disabled: pos === 0, run: async () => { await act(`${W(p.s, idx)}/move`, { to: wins[pos - 1].index }); refresh(); } },
     { label: 'Move right', icon: '→', disabled: pos === wins.length - 1, run: async () => { await act(`${W(p.s, idx)}/move`, { to: wins[pos + 1].index }); refresh(); } },
     { label: 'Open beside', icon: '⊞', disabled: T.panes.length >= MAX_PANES, run: () => addPane(p.s, idx) },
     '-',
-    { label: 'Close window', icon: '✕', danger: true, run: async () => { if (confirm(`Close window "${wins[pos].name}"?`)) { await act(W(p.s, idx), null, 'DELETE'); refresh(); } } },
+    { label: 'Close window', icon: '✕', danger: true, run: async () => { if (await ask({ title: `Close window "${wins[pos].name}"?`, message: 'Whatever runs in it stops.', ok: 'Close window', danger: true })) { await act(W(p.s, idx), null, 'DELETE'); refresh(); } } },
   ]);
 });
 $('#t-panes').addEventListener('click', async (e) => {
@@ -276,7 +280,7 @@ $('#t-ask').addEventListener('click', async (e) => {
 });
 $('#t-name').addEventListener('click', async () => {
   const p = focused(); if (!p) return;
-  const to = prompt('Rename session (letters, digits, - _ .)', p.s);
+  const to = await ask({ title: 'Rename session', label: 'Name', value: p.s, ok: 'Rename', validate: NAME_RULE });
   if (!to || to === p.s) return;
   await act(`/api/sessions/${encodeURIComponent(p.s)}/rename`, { to });
   history.replaceState({ term: to }, ''); p.s = to; await refresh(); p.connect();
@@ -288,6 +292,7 @@ $('#btn-addwin').addEventListener('click', (e) => {
   }), '-', { label: 'In another folder…', icon: '…', run: () => openNew('window', p.s) }]);
 });
 
+const renameWin = (value) => ask({ title: 'Rename window', label: 'Name', value, ok: 'Rename', validate: (v) => v ? '' : 'Enter a name.' });
 const cur = () => { const p = focused(); const w = p?.win; return w && { p, w, ap: activePane(w), t: W(p.s, w.index) }; };
 $('#w-toggle').addEventListener('click', async (e) => {
   const c = cur(); if (!c) return;
@@ -315,7 +320,7 @@ $('#w-panes').addEventListener('click', (e) => {
     { label: 'Type into all panes', checked: c.w.sync, icon: ' ', disabled: c.w.panes.length < 2, run: pane('sync') },
     '-',
     { label: 'Close pane', icon: '✕', danger: true, disabled: c.w.panes.length < 2, run: async () => {
-      if (confirm(`Close pane ${c.ap.index} (${c.ap.cmd})?`)) { await act(W(c.p.s, `${c.w.index}.${c.ap.index}`), null, 'DELETE'); refresh(); }
+      if (await ask({ title: `Close pane ${c.ap.index}?`, message: `${c.ap.cmd} in this pane stops.`, ok: 'Close pane', danger: true })) { await act(W(c.p.s, `${c.w.index}.${c.ap.index}`), null, 'DELETE'); refresh(); }
     } },
   ]);
 });
@@ -324,7 +329,7 @@ $('#w-find').addEventListener('click', () => { const c = cur(); if (c) openFind(
 $('#w-scroll').addEventListener('click', () => { const p = focused(); if (p) queueScroll(p, -15); });
 $('#w-kill').addEventListener('click', async () => {
   const c = cur(); if (!c) return;
-  if (!confirm(`Close window "${c.w.name}"?${c.w.running ? ` ${c.ap.cmd} is still running and will be killed.` : ''}`)) return;
+  if (!await ask({ title: `Close window "${c.w.name}"?`, message: c.w.running ? `${c.ap.cmd} is still running and will be stopped.` : 'The window and its panes close.', ok: 'Close window', danger: true })) return;
   await act(c.t, null, 'DELETE'); refresh();
 });
 for (const [id, d] of [['#w-font-dec', -1], ['#w-font-inc', 1]]) $(id).addEventListener('click', () => setFont(T.fontSize + d));
@@ -340,7 +345,9 @@ export function setTheme(name) {
 }
 document.documentElement.dataset.term = T.theme;
 
-// ---------- scrolling (tmux copy mode) and pinch zoom ----------
+// ---------- scrolling and pinch zoom ----------
+// The server picks the right kind of scroll: tmux history for shells, wheel events for full-screen
+// apps with mouse support (Claude Code, codex), arrow keys for other full-screen apps (less, man).
 const scr = new WeakMap();
 function queueScroll(p, lines) {
   const st = scr.get(p) || { acc: 0, t: null }; scr.set(p, st);
@@ -349,33 +356,56 @@ function queueScroll(p, lines) {
   st.t = setTimeout(async () => {
     const n = st.acc; st.acc = 0; st.t = null;
     const w = p.win; if (!w || !n) return;
-    if (n > 0 && !w.inMode) return;
-    try { await api(`${W(p.s, w.index)}/scroll`, { method: 'POST', body: { dir: n < 0 ? 'up' : 'down', lines: Math.abs(n) } }); } catch {}
-    if (n < 0) { w.inMode = true; $('.scrollhint', p.el).hidden = false; }
+    let r = {};
+    try { r = await api(`${W(p.s, w.index)}/scroll`, { method: 'POST', body: { dir: n < 0 ? 'up' : 'down', lines: Math.abs(n) } }); } catch {}
+    if (r.mode === 'copy' && n < 0) { w.inMode = true; $('.scrollhint', p.el).hidden = false; }
     clearTimeout(st.r); st.r = setTimeout(refresh, 400);
-  }, 120);
+  }, 60);
 }
 function touchScroll(p) {
-  let y0 = null, acc = 0, pinch = null;
+  let y0 = null, acc = 0, pinch = null, samples = [], fling = 0;
   const el = $('.tbody', p.el);
+  const cell = () => T.fontSize * 1.3;
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const move = (dy) => { // finger down = back in history
+    acc += dy;
+    const lines = Math.trunc(acc / cell());
+    if (lines) { acc -= lines * cell(); queueScroll(p, -lines); }
+  };
+  // capture phase: we see the gesture even if xterm handles the touch itself
+  const o = { passive: true, capture: true };
   el.addEventListener('touchstart', (e) => {
+    cancelAnimationFrame(fling);
     if (e.touches.length === 2) { pinch = { d: dist(e.touches), size: T.fontSize }; y0 = null; }
-    else if (e.touches.length === 1) { y0 = e.touches[0].clientY; acc = 0; }
-  }, { passive: true });
+    else if (e.touches.length === 1) { y0 = e.touches[0].clientY; acc = 0; samples = [[performance.now(), y0]]; }
+  }, o);
   el.addEventListener('touchmove', (e) => {
     if (pinch && e.touches.length === 2) {
       const n = Math.round(pinch.size * dist(e.touches) / pinch.d);
       if (n !== T.fontSize) setFont(n);
       return;
     }
-    if (y0 == null || p.term.modes.mouseTrackingMode !== 'none') return;
-    const y = e.touches[0].clientY; acc += y - y0; y0 = y;
-    const cell = T.fontSize * 1.3;
-    const lines = Math.trunc(acc / cell);
-    if (lines) { acc -= lines * cell; queueScroll(p, -lines); } // finger down = back in history
-  }, { passive: true });
-  el.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinch = null; if (!e.touches.length) y0 = null; });
+    if (y0 == null) return;
+    const y = e.touches[0].clientY;
+    move(y - y0); y0 = y;
+    samples.push([performance.now(), y]); if (samples.length > 5) samples.shift();
+  }, o);
+  el.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) pinch = null;
+    if (e.touches.length || y0 == null) return;
+    y0 = null;
+    // momentum, like native lists: keep going at the release speed, slowing down
+    const [t0, ya] = samples[0], [t1, yb] = samples.at(-1);
+    let v = t1 - t0 > 0 && performance.now() - t1 < 80 ? (yb - ya) / (t1 - t0) : 0; // px per ms
+    if (Math.abs(v) < 0.3 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let last = performance.now();
+    const step = (now) => {
+      const dt = now - last; last = now;
+      move(v * dt); v *= Math.pow(0.996, dt);
+      if (Math.abs(v) > 0.05) fling = requestAnimationFrame(step);
+    };
+    fling = requestAnimationFrame(step);
+  }, o);
 }
 
 // ---------- extra keys for touch keyboards ----------

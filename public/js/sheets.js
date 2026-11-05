@@ -1,5 +1,5 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
-import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask } from './core.js';
 import { refresh } from './wall.js';
 import { openTerm, setFont, setTheme, T, THEMES } from './term.js';
 import { start } from './main.js';
@@ -151,7 +151,7 @@ $('#ch-push').addEventListener('click', async (e) => {
   try { await act('/api/git/push', { path: chPath }); toast('Pushed'); loadChanges(); } catch {} finally { e.target.disabled = false; }
 });
 $('#ch-pr').addEventListener('click', async (e) => {
-  const title = prompt('Pull request title (leave empty to use the commits)', '');
+  const title = await ask({ title: 'Create pull request', label: 'Title', placeholder: 'Uses the commit messages if empty', ok: 'Create pull request' });
   if (title === null) return;
   e.target.disabled = true;
   try {
@@ -160,10 +160,10 @@ $('#ch-pr').addEventListener('click', async (e) => {
   } catch {} finally { e.target.disabled = false; }
 });
 $('#ch-wt').addEventListener('click', async () => {
-  if (!confirm('Remove this worktree folder? The branch stays in the repository.')) return;
+  if (!await ask({ title: 'Remove this worktree?', message: 'The folder is deleted. The branch stays in the repository.', ok: 'Remove worktree', danger: true })) return;
   try { await api('/api/git/worktree', { method: 'DELETE', body: { path: chPath } }); }
   catch (e) {
-    if (!confirm(`${e.message}\n\nRemove it anyway and lose uncommitted changes?`)) return;
+    if (!await ask({ title: 'Worktree has uncommitted changes', message: `${e.message}. Removing it anyway loses them.`, ok: 'Remove and lose changes', danger: true })) return;
     await act('/api/git/worktree', { path: chPath, force: true }, 'DELETE');
   }
   toast('Worktree removed'); dCh.close();
@@ -313,7 +313,7 @@ $('#sf-save').addEventListener('click', async () => {
   try { await saveSched(list); toast(`Saved ${label}`); } catch {}
 });
 $('#sf-del').addEventListener('click', async () => {
-  if (!confirm(`Delete schedule "${sch[editing].label}"?`)) return;
+  if (!await ask({ title: `Delete schedule "${sch[editing].label}"?`, message: 'It stops running. Sessions it already started keep going.', ok: 'Delete schedule', danger: true })) return;
   await saveSched(sch.filter((_, i) => i !== editing)).catch(() => {});
 });
 $('#sch-list').addEventListener('click', async (e) => {
@@ -373,7 +373,7 @@ $('#set-save').addEventListener('click', async () => {
     dSet.close(); toast('Settings saved');
   } catch (e) { $('#set-err').textContent = e.message; }
 });
-$('#set-logout').addEventListener('click', () => {
-  if (!confirm('Disconnect and forget this machine on this device?')) return;
+$('#set-logout').addEventListener('click', async () => {
+  if (!await ask({ title: 'Forget this machine?', message: 'This device forgets the address and token. Sessions on the machine keep running.', ok: 'Forget machine', danger: true })) return;
   S.machines.splice(S.cur, 1); S.cur = 0; saveMachines(); dSet.close(); start();
 });

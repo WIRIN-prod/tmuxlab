@@ -150,12 +150,26 @@ const routes = [
   }],
   ['POST', r(`${W}/scroll`), async ([s, w], b) => {
     const t = tgt(s, w);
-    const n = String(Math.max(1, Math.min(b.lines | 0 || 10, 500)));
+    const lines = Math.max(1, Math.min(b.lines | 0 || 10, 500)), n = String(lines);
+    if (b.dir === 'cancel') { await tmux('send-keys', '-t', t, '-X', 'cancel').catch(() => {}); return { mode: 'copy' }; }
+    const up = b.dir === 'up';
+    const [inMode, alt, mouse, sgr, wd, ht] = (await tmux('display-message', '-p', '-t', t,
+      '#{pane_in_mode} #{alternate_on} #{mouse_any_flag} #{mouse_sgr_flag} #{pane_width} #{pane_height}')).trim().split(' ').map(Number);
+    // full-screen apps (Claude Code, codex, vim, less) keep their own scrollback: do what a terminal does with a wheel
+    if (!inMode && alt) {
+      if (mouse) {
+        const x = Math.ceil(wd / 2), y = Math.ceil(ht / 2), btn = up ? 64 : 65;
+        const ev = sgr ? `\x1b[<${btn};${x};${y}M` : `\x1b[M${String.fromCharCode(32 + btn, 32 + Math.min(x, 222), 32 + Math.min(y, 222))}`;
+        await tmux('send-keys', '-t', t, '-l', ev.repeat(Math.min(40, Math.max(1, Math.round(lines / 3))))); // one wheel notch ≈ 3 lines
+        return { mode: 'app' };
+      }
+      await tmux('send-keys', '-t', t, '-N', String(Math.min(lines, 100)), up ? 'Up' : 'Down'); // xterm's alternateScroll
+      return { mode: 'keys' };
+    }
     // -e: copy mode exits by itself when scrolled back to the bottom
-    if (b.dir === 'up') { await tmux('copy-mode', '-e', '-t', t); await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-up'); }
-    else if (b.dir === 'down') await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-down').catch(() => {});
-    else await tmux('send-keys', '-t', t, '-X', 'cancel').catch(() => {});
-    return {};
+    if (up) { await tmux('copy-mode', '-e', '-t', t); await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-up'); return { mode: 'copy' }; }
+    if (inMode) await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-down').catch(() => {});
+    return { mode: inMode ? 'copy' : 'none' };
   }],
   ['GET', r(`${W}/capture`), async ([s, w], _, q) => {
     const lines = Math.min(+(q.get('lines') || 30), 5000);

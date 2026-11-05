@@ -1,13 +1,15 @@
 // The session wall: live previews, status, approvals, machine stats.
-import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy } from './core.js';
 import { openTerm, renderTermBar } from './term.js';
 import { openNew, openChanges, openPalette, openSettings, openSchedules } from './sheets.js';
 import { start, addMachine } from './main.js';
 
 const seenPrompts = new Set();
+let fails = 0;
 let primed = false; // prompts already waiting when the app opens don't pop up
 export async function refresh() {
-  try { S.sessions = await api('/api/sessions'); } catch { return; }
+  try { S.sessions = await api('/api/sessions'); fails = 0; $('#offline').hidden = true; }
+  catch { if (++fails >= 2) $('#offline').hidden = false; return; } // one blip isn't worth a banner
   // tell the user about new questions from agents (phone alerts cover the app being closed)
   for (const s of S.sessions) for (const w of s.windows) for (const p of w.panes || []) {
     const k = `${s.name}:${w.index}.${p.index}:${p.prompt?.question}`;
@@ -102,11 +104,11 @@ function headerFor(p, sessions) {
   if (h.dataset.sig === sig) return h;
   h.dataset.sig = sig;
   h.classList.toggle('none', !p.id);
-  h.innerHTML = `<button class="pt" data-ptoggle aria-expanded="${open}"><span class="chev">${open ? '▾' : '▸'}</span>${p.id ? FOLDER : ''}<b>${esc(p.label)}</b>
+  h.innerHTML = `<button class="pt" data-ptoggle aria-expanded="${open}">${icon('down', 'ico chev')}${p.id ? FOLDER : ''}<b>${esc(p.label)}</b>
       <span class="pc">${sessions.length ? `${sessions.length} session${sessions.length > 1 ? 's' : ''}` : 'empty'}${runs ? ` · <i class="r">${runs} running</i>` : ''}${asks ? ` · <i class="q">${asks} waiting</i>` : ''}</span></button>
     ${p.cwd ? `<span class="pd">${esc(home(p.cwd))}</span>` : ''}<span class="spacer"></span>
-    <button class="btn sm ghost" data-pnew title="New session in ${esc(p.label)}" aria-label="New session in ${esc(p.label)}">+<span class="lbl"> Session</span></button>
-    ${p.id ? `<button class="btn sm ghost icon" data-pmore aria-haspopup="menu" aria-label="Project actions for ${esc(p.label)}">⋯</button>` : ''}`;
+    <button class="btn sm ghost" data-pnew title="New session in ${esc(p.label)}" aria-label="New session in ${esc(p.label)}">${icon('plus')}<span class="lbl">Session</span></button>
+    ${p.id ? `<button class="btn sm ghost icon" data-pmore aria-haspopup="menu" aria-label="Project actions for ${esc(p.label)}">${icon('more')}</button>` : ''}`;
   return h;
 }
 
@@ -144,7 +146,7 @@ function cardFor(s) {
     ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}">Stop ${esc(rp.cmd)}</button>`
       : aw.preset ? `<button class="btn sm run" data-a="start" title="${esc(aw.preset)}">Start ${esc(aw.preset.split(' ')[0])}</button>` : ''}
     <span class="use">${st ? `${Math.round(st.cpu)}% CPU · ${bytes(st.rss)}` : ''}</span>
-    <button class="btn sm ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">⋯</button>`;
+    <button class="btn sm ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">${icon('more')}</button>`;
   return card;
 }
 
@@ -153,8 +155,8 @@ $('#grid').addEventListener('click', async (e) => {
   if (ph) return projectAction(e, ph.dataset.h);
   const card = e.target.closest('.card'); if (!card) return;
   const s = findSess(card.dataset.s); if (!s) return;
-  const ask = e.target.closest('.ask [data-n]');
-  if (ask) { await act(`${W(s.name, ask.closest('.ask').dataset.t)}/choose`, { n: +ask.dataset.n }); toast('Answered'); return setTimeout(refresh, 500); }
+  const choice = e.target.closest('.ask [data-n]');
+  if (choice) { await act(`${W(s.name, choice.closest('.ask').dataset.t)}/choose`, { n: +choice.dataset.n }); toast('Answered'); return setTimeout(refresh, 500); }
   const wb = e.target.closest('.win');
   if (wb) { await act(`${W(s.name, wb.dataset.w)}/select`); return refresh().then(refreshPreviews); }
   if (e.target.closest('.screen')) return openTerm(s.name);
@@ -170,12 +172,12 @@ $('#grid').addEventListener('click', async (e) => {
     ...(aw.branch ? [{ label: 'Changes', icon: '±', run: () => openChanges(activePane(aw).cwd) }] : []),
     { label: 'Move to project', icon: '▤', run: () => menu(e.target.closest('button'), moveItems([s.name], projectOf(s))) },
     { label: 'Rename', icon: '✎', run: async () => {
-      const to = prompt('Rename session (letters, digits, - _ .)', s.name);
+      const to = await ask({ title: 'Rename session', label: 'Name', value: s.name, ok: 'Rename', validate: NAME_RULE });
       if (to && to !== s.name) { await act(`/api/sessions/${encodeURIComponent(s.name)}/rename`, { to }); refresh(); }
     } },
     '-',
     { label: 'End session', icon: '✕', danger: true, run: async () => {
-      if (!confirm(`End session "${s.name}"? Everything running in it stops.`)) return;
+      if (!await ask({ title: `End session "${s.name}"?`, message: 'Everything running in it stops. This can\'t be undone.', ok: 'End session', danger: true })) return;
       await act(`/api/sessions/${encodeURIComponent(s.name)}`, null, 'DELETE'); toast(`Ended ${s.name}`); refresh();
     } },
   ]);
@@ -199,8 +201,11 @@ export async function saveProjects(list) {
   renderWall();
 }
 export async function newProject() {
-  const label = prompt('Project name')?.trim().slice(0, 40); if (!label) return null;
-  const cwd = prompt('Default folder for its sessions (optional)', '~/')?.trim();
+  const label = await ask({ title: 'New project', label: 'Name', placeholder: 'My app', ok: 'Next',
+    validate: (v) => !v ? 'Enter a name.' : v.length > 40 ? 'Keep it under 40 characters.' : '' }); if (!label) return null;
+  const cwd = await ask({ title: `Folder for ${label}`, label: 'Default folder', value: '~/', ok: 'Create project',
+    help: 'New sessions in this project start here. Leave as ~/ for none.' });
+  if (cwd === null) return null;
   const base = label.toLowerCase().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 56) || 'project';
   let id = base, n = 2; while (S.projects.some((p) => p.id === id)) id = `${base}-${n++}`;
   const p = { id, label, ...(cwd && cwd !== '~/' ? { cwd } : {}) };
@@ -219,9 +224,11 @@ function projectAction(e, id) {
   const edit = (patch) => saveProjects(S.projects.map((x) => x.id === id ? { ...x, ...patch } : x));
   const i = S.projects.indexOf(p);
   menu(e.target.closest('button'), [
-    { label: 'Rename', icon: '✎', run: () => { const l = prompt('Project name', p.label)?.trim(); if (l) edit({ label: l.slice(0, 40) }); } },
-    { label: 'Default folder', icon: '…', sub: p.cwd ? home(p.cwd) : 'none', run: () => {
-      const c = prompt('Default folder for new sessions (empty for none)', p.cwd || ''); if (c == null) return;
+    { label: 'Rename', icon: '✎', run: async () => {
+      const l = await ask({ title: 'Rename project', label: 'Name', value: p.label, ok: 'Rename', validate: (v) => !v ? 'Enter a name.' : v.length > 40 ? 'Keep it under 40 characters.' : '' });
+      if (l) edit({ label: l }); } },
+    { label: 'Default folder', icon: '…', sub: p.cwd ? home(p.cwd) : 'none', run: async () => {
+      const c = await ask({ title: 'Default folder', label: 'Folder', value: p.cwd || '', placeholder: '~/code/app', ok: 'Save', help: 'Leave empty for none.' }); if (c == null) return;
       const { cwd, ...rest } = p; saveProjects(S.projects.map((x) => x.id === id ? { ...rest, ...(c.trim() ? { cwd: c.trim() } : {}) } : x));
     } },
     { label: 'Move up', icon: '↑', disabled: i === 0, run: () => { const l = [...S.projects]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; saveProjects(l); } },
@@ -229,13 +236,15 @@ function projectAction(e, id) {
     '-',
     { label: 'Delete project', icon: '✕', danger: true, run: async () => {
       const inside = S.sessions.filter((s) => s.project === id);
-      if (!confirm(`Delete project "${p.label}"?${inside.length ? ` Its ${inside.length} session${inside.length > 1 ? 's keep' : ' keeps'} running under No project.` : ''}`)) return;
+      if (!await ask({ title: `Delete project "${p.label}"?`, message: inside.length ? `Its ${inside.length} session${inside.length > 1 ? 's keep' : ' keeps'} running under No project.` : 'It has no sessions.', ok: 'Delete project', danger: true })) return;
       for (const s of inside) await act(`/api/sessions/${encodeURIComponent(s.name)}/project`, { project: '' }).catch(() => {});
       await saveProjects(S.projects.filter((x) => x.id !== id)); refresh();
     } },
   ]);
 }
 $('#btn-project').addEventListener('click', () => newProject());
+$('#offline-retry').addEventListener('click', (e) => busy(e.currentTarget, refresh));
+addEventListener('online', () => refresh());
 
 // desktop: drag a card onto a project heading
 $('#grid').addEventListener('dragstart', (e) => { const c = e.target.closest('.card'); if (c) e.dataTransfer.setData('text/x-tmuxlab-session', c.dataset.s); });
@@ -258,6 +267,7 @@ $('#filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   S.filter = b.dataset.f;
   for (const x of $('#filters').children) x.setAttribute('aria-selected', x === b);
+  store.set('filter', S.filter);
   renderWall(); refreshPreviews();
 });
 $('#btn-new').addEventListener('click', () => openNew());
@@ -276,12 +286,12 @@ $('#machine').addEventListener('click', async (e) => {
       run: () => { S.cur = i; saveMachines(); start(); } })),
     '-',
     { label: 'Add machine', icon: '+', run: () => addMachine() },
-    { label: 'Rename this machine', icon: '✎', run: () => {
-      const n = prompt('Name for this machine', cfg().name || S.info?.host || ''); if (n == null) return;
-      cfg().name = n.trim(); saveMachines(); renderWall();
+    { label: 'Rename this machine', icon: '✎', run: async () => {
+      const n = await ask({ title: 'Rename this machine', label: 'Name on this device', value: cfg().name || S.info?.host || '', ok: 'Rename' }); if (n == null) return;
+      cfg().name = n; saveMachines(); renderWall();
     } },
-    { label: 'Remove this machine', icon: '✕', danger: true, run: () => {
-      if (!confirm(`Remove ${cfg().name || cfg().base} from this device? Sessions keep running.`)) return;
+    { label: 'Remove this machine', icon: '✕', danger: true, run: async () => {
+      if (!await ask({ title: `Remove ${cfg().name || new URL(cfg().base).host}?`, message: 'This device forgets the address and token. Sessions on the machine keep running.', ok: 'Remove', danger: true })) return;
       S.machines.splice(S.cur, 1); S.cur = 0; saveMachines(); start();
     } },
   ]);
@@ -292,3 +302,4 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openPalette(); }
   else if (e.key === 'n' && !e.ctrlKey && !e.metaKey && e.target === document.body) { e.preventDefault(); openNew(); }
 });
+for (const x of $('#filters').children) x.setAttribute('aria-selected', x.dataset.f === S.filter);

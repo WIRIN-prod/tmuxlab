@@ -207,3 +207,29 @@ test('projects: config, assign on create, move, survive rename, clear', async ()
   assert.equal(await find('pj3'), undefined);
   await api('/api/sessions/pj2', 'DELETE');
 });
+
+test('scroll goes to full-screen apps as wheel events, to shells as tmux history', async () => {
+  const app = path.join(home, 'fullscreen.py');
+  // alternate screen + SGR mouse, like Claude Code's full-screen mode; counts wheel-up events it receives
+  fs.writeFileSync(app, `import sys, tty, os
+sys.stdout.write("\\x1b[?1049h\\x1b[?1000h\\x1b[?1006hREADY\\n"); sys.stdout.flush()
+tty.setraw(0); buf = ""; ups = 0
+while True:
+    buf += os.read(0, 64).decode()
+    while "\\x1b[<64;" in buf:
+        ups += 1; buf = buf.replace("\\x1b[<64;", "", 1)
+        sys.stdout.write("\\rUP %d   " % ups); sys.stdout.flush()
+`);
+  await api('/api/sessions', 'POST', { name: 'fs', cwd: home, cmd: `python3 ${app}` });
+  await until(async () => (await api('/api/windows/fs/0/capture')).text.includes('READY'));
+  assert.equal((await api('/api/windows/fs/0/scroll', 'POST', { dir: 'up', lines: 9 })).mode, 'app');
+  await until(async () => (await api('/api/windows/fs/0/capture')).text.includes('UP 3'));
+  assert.equal((await find('fs')).windows[0].inMode, false); // no tmux copy mode over the app
+  await api('/api/sessions/fs', 'DELETE');
+
+  await api('/api/sessions', 'POST', { name: 'sh', cwd: home, cmd: 'seq 1 200' });
+  await until(async () => (await api('/api/windows/sh/0/capture')).text.includes('200'));
+  assert.equal((await api('/api/windows/sh/0/scroll', 'POST', { dir: 'down', lines: 5 })).mode, 'none');
+  assert.equal((await api('/api/windows/sh/0/scroll', 'POST', { dir: 'up', lines: 5 })).mode, 'copy');
+  await api('/api/sessions/sh', 'DELETE');
+});
