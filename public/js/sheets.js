@@ -1,5 +1,5 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
-import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText } from './core.js';
 import { refresh } from './wall.js';
 import { openTerm, setFont, setTheme, T, THEMES } from './term.js';
 import { start } from './main.js';
@@ -226,10 +226,10 @@ function renderPal() {
   pal.items = [
     ...S.sessions.flatMap((s) => [
       ...(pal.pick ? [] : [{ label: s.name, meta: `${S.projects.find((p) => p.id === s.project)?.label ?? ''} ${s.windows.length} windows`.trim(), dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
-      ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: w.running ? w.cmd : home(w.cwd), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
+      ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: whereText(w), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
     ]),
     ...(pal.pick ? [] : [{ label: 'New session…', meta: '', go: () => openNew() }, { label: 'Schedules', meta: '', go: openSchedules }, { label: 'Settings', meta: '', go: openSettings }]),
-  ].filter((x) => x.label.toLowerCase().includes(q)).slice(0, 60);
+  ].filter((x) => `${x.label} ${x.meta}`.toLowerCase().includes(q)).slice(0, 60);
   pal.sel = Math.min(pal.sel, Math.max(0, pal.items.length - 1));
   $('#pal-list').innerHTML = pal.items.map((x, i) => `<li role="option" data-i="${i}" aria-selected="${i === pal.sel}">
     <span class="dot ${x.dot || ''}"></span>${esc(x.label)}<span class="m">${esc(x.meta)}</span></li>`).join('');

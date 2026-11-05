@@ -155,7 +155,6 @@ legend { font-size: 14px; font-weight: 500; padding: 0; margin-bottom: 6px; }
 .screen:active { border-color: var(--line-strong); }
 .screen pre { margin: 0; padding: 8px 10px; font: 11px/1.35 var(--mono); color: #BCC8DC; white-space: pre; overflow: hidden; }
 .screen::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(var(--screen), transparent 30%); }
-.screen .path { position: absolute; top: 0; left: 0; right: 0; padding: 6px 10px; background: var(--screen); z-index: 1; font: 11px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-f { display: flex; gap: 6px; padding: 10px; align-items: center; }
 .card-f .use { margin-left: auto; font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .asks:empty { display: none; }
@@ -375,3 +374,15 @@ body:has(#term:not([hidden])) #toasts { bottom: auto; top: calc(var(--safe-t) + 
 .filters [role=tablist] { display: flex; gap: 4px; }
 code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 .offline .ico { color: var(--danger); }
+/* where a window runs: agent · repo · worktree · folder */
+.where { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.where > * { flex: none; }
+.where .agent { color: var(--live); font-weight: 600; }
+.where .repo { color: var(--text); }
+.where .wt { color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent); border-radius: var(--r-sm); padding: 0 6px; font-size: 12px; }
+.where .cwd { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 12px var(--mono); direction: rtl; text-align: left; } /* keep the end of the path visible */
+.wbar > * { flex: none; }
+.wbar .wcmd { flex: 0 1 auto; }
+.card .where { padding: 0 14px 10px; }
+.where.ctx { padding: 4px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+@media (max-height: 480px) and (orientation: landscape) { .where.ctx { display: none; } }

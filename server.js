@@ -28,9 +28,12 @@ const authed = (t) => typeof t === 'string' && t.length === TOKEN.length && cryp
 // --- sessions, windows, panes ---
 async function listSessions() {
   const rows = await listPanes();
-  const cwds = [...new Set(rows.filter((r) => r.pane_active === '1').map((r) => r.pane_current_path))];
-  const branches = new Map(await Promise.all(cwds.map(async (c) => [c, await G.branchOf(c)])));
-  return shape(rows, (r) => ({ prompt: prompts.get(r.pane_id) || null, branch: branches.get(r.pane_current_path) || '' })).list;
+  const cwds = [...new Set(rows.map((r) => r.pane_current_path))];
+  const repos = new Map(await Promise.all(cwds.map(async (c) => [c, await G.repoOf(c)])));
+  return shape(rows, (r) => {
+    const g = repos.get(r.pane_current_path);
+    return { prompt: prompts.get(r.pane_id) || null, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
+  }).list;
 }
 
 const presetOf = (id) => loadConf('presets').find((p) => p.id === id);
@@ -52,12 +55,19 @@ async function addStep(name, cwd, st, splitOf) {
   return where;
 }
 
+async function freeName(base) {
+  base = base.replace(/[^\w.-]+/g, '-').replace(/^[-.]+|-+$/g, '').slice(0, 56) || 'session';
+  const taken = new Set((await tmux('list-sessions', '-F', '#{session_name}').catch(() => '')).split('\n'));
+  let n = base, i = 2; while (taken.has(n)) n = `${base}-${i++}`;
+  return n;
+}
+
 async function createSession({ name, cwd, stack, worktree, project, ...st }) {
-  name = sess(name || `s${Date.now().toString(36).slice(-5)}`);
-  if (VIEW_RE.test(name)) throw httpErr(400, 'bad session name');
   if (project && !NAME_RE.test(project)) throw httpErr(400, 'bad project');
   let dir = resolveCwd(cwd);
   if (worktree?.branch) dir = await G.addWorktree(dir, worktree.branch);
+  name = sess(name || await freeName(path.basename(dir))); // unnamed sessions are named after their folder, not a number
+  if (VIEW_RE.test(name)) throw httpErr(400, 'bad session name');
   const steps = stack ? loadConf('stacks').find((s) => s.id === stack)?.windows : [st];
   if (!steps) throw httpErr(400, `no stack ${stack}`);
   const label = stepLabel(steps[0]);

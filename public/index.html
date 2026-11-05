@@ -91,6 +91,7 @@
     <button class="btn ghost icon" id="btn-split" aria-label="Show another window beside this one" title="Split view"><svg class="ico" aria-hidden="true"><use href="#i-columns"/></svg></button>
     <span class="conn" id="t-conn" role="status"><span class="sr-only" id="t-conn-l">Connecting</span></span>
   </header>
+  <div class="where ctx" id="t-where" aria-label="Where this window runs"></div>
   <div class="wbar" id="t-wbar">
     <button class="btn sm" id="w-toggle"></button>
     <button class="btn sm ghost" id="w-restart" title="Interrupt and rerun">Restart</button>
@@ -120,7 +121,7 @@
 <dialog id="dlg-new" class="sheet">
   <form method="dialog" id="new-form">
     <h2 id="new-title">New session</h2>
-    <label id="new-name-row">Name<input id="new-name" pattern="[\w.\-]{1,64}" placeholder="my-app" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label id="new-name-row">Name<input id="new-name" pattern="[\w.\-]{1,64}" placeholder="Named after the folder" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
     <label id="new-project-row">Project<select id="new-project"></select></label>
     <fieldset>
       <legend>Start with</legend>

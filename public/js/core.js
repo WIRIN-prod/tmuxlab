@@ -73,6 +73,17 @@ export const winState = (w) => (w.dead ? 'dead' : w.running ? 'run' : 'idle');
 export const activeWin = (s) => s.windows.find((w) => w.active) || s.windows[0];
 export const findSess = (n) => S.sessions.find((s) => s.name === n);
 export const activePane = (w) => w.panes?.find((p) => p.active) || w.panes?.[0] || w;
+// what a window is doing and where: the agent (or the running program), the repo, the worktree and the folder.
+// Read from the pane that runs something, since that's the one you care about.
+export const placeOf = (w) => { const p = w.panes?.find((x) => x.running) || activePane(w); return { cmd: p.running ? p.cmd : '', repo: p.repo, wt: p.wt, cwd: home(p.cwd) }; };
+export function whereHtml(w) {
+  const x = placeOf(w);
+  return `${x.cmd ? `<b class="agent">${esc(x.cmd)}</b>` : '<span>shell</span>'}`
+    + (x.repo ? `<span class="repo" title="git repository">${esc(x.repo)}</span>` : '')
+    + (x.wt ? `<span class="wt" title="git worktree">worktree ${esc(x.wt)}</span>` : '')
+    + `<span class="cwd" title="${esc(x.cwd)}"><bdi>${esc(x.cwd)}</bdi></span>`;
+}
+export const whereText = (w) => { const x = placeOf(w); return [x.cmd, x.repo, x.wt && `worktree ${x.wt}`, x.cwd].filter(Boolean).join(' · '); };
 export const vibrate = () => { if (touch) navigator.vibrate?.(6); };
 
 // Android Back / browser back closes the top overlay first. Each open overlay owns one history entry.

@@ -1,5 +1,5 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
-import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow } from './sheets.js';
 
@@ -197,7 +197,7 @@ export function renderTermBar() {
   const p = focused(); if (!p) return;
   const s = p.sess, w = p.win;
   $('#t-name').textContent = p.s;
-  for (const x of T.panes) { $('.tpn', x.el).textContent = `${x.s} › ${x.win?.name ?? ''}`; if (x.view && x.sess?.views[x.view] != null) x.wIdx = x.sess.views[x.view]; }
+  for (const x of T.panes) { $('.tpn', x.el).textContent = `${x.s} › ${x.win?.name ?? ''}${x.win ? ` · ${whereText(x.win)}` : ''}`; if (x.view && x.sess?.views[x.view] != null) x.wIdx = x.sess.views[x.view]; }
   if (!s || !w) return;
   // tabs: dot = state, ring = output you haven't looked at
   const key = (i) => `${p.s}:${i}`;
@@ -222,7 +222,8 @@ export function renderTermBar() {
   $('#w-restart').hidden = !ap.preset;
   $('#w-changes').hidden = !w.branch;
   $('#w-changes').textContent = w.branch ? `⎇ ${w.branch}` : '';
-  $('#w-cmd').textContent = ap.preset ? `$ ${ap.preset}` : home(ap.cwd);
+  $('#w-cmd').textContent = ap.preset ? `$ ${ap.preset}` : '';
+  $('#t-where').innerHTML = whereHtml(w);
   $('#w-panes').textContent = w.panes.length > 1 ? `Panes ${w.panes.length}${w.zoomed ? ' · zoomed' : ''}${w.sync ? ' · synced' : ''}` : 'Panes';
   // tmux panes inside this window
   const pr = $('#t-panes');

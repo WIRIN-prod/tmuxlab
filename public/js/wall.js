@@ -1,5 +1,5 @@
 // The session wall: live previews, status, approvals, machine stats.
-import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy, whereHtml } from './core.js';
 import { openTerm, renderTermBar } from './term.js';
 import { openNew, openChanges, openPalette, openSettings, openSchedules } from './sheets.js';
 import { start, addMachine } from './main.js';
@@ -120,8 +120,8 @@ function cardFor(s) {
     card.className = 'card';
     card.dataset.s = s.name;
     card.draggable = !touch;
-    card.innerHTML = `<div class="card-h"></div><div class="wins"></div><div class="asks"></div>
-      <div class="screen" role="button" tabindex="0" aria-label="Open ${esc(s.name)}"><span class="path"></span><pre></pre></div>
+    card.innerHTML = `<div class="card-h"></div><div class="where"></div><div class="wins"></div><div class="asks"></div>
+      <div class="screen" role="button" tabindex="0" aria-label="Open ${esc(s.name)}"><pre></pre></div>
       <div class="card-f"></div>`;
     $('pre', card).textContent = S.previews[s.name] ?? '';
   }
@@ -141,7 +141,7 @@ function cardFor(s) {
   $('.wins', card).innerHTML = s.windows.map((w) => `<button class="win ${w.active ? 'active' : ''}" data-w="${w.index}" title="${esc(w.cmd)}">
     <span class="dot ${w.prompt ? 'ask-dot' : winState(w)}"></span>${esc(w.name)}${w.panes.length > 1 ? `<span class="c">${w.panes.length} panes</span>` : w.running ? `<span class="c">${esc(w.cmd)}</span>` : ''}</button>`).join('');
   $('.asks', card).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
-  $('.path', card).textContent = home(aw.cwd);
+  $('.where', card).innerHTML = whereHtml(aw);
   $('.card-f', card).innerHTML = `<button class="btn sm primary" data-a="open">Open</button>
     ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}">Stop ${esc(rp.cmd)}</button>`
       : aw.preset ? `<button class="btn sm run" data-a="start" title="${esc(aw.preset)}">Start ${esc(aw.preset.split(' ')[0])}</button>` : ''}
