@@ -40,11 +40,11 @@ before(async () => {
   });
   await until(async () => fetch(base + '/').then(() => true));
 });
-after(() => {
-  srv.kill();
+after(async () => {
+  srv.kill(); await new Promise((r) => srv.exitCode !== null ? r() : srv.once('exit', r)); // the server may still be writing
   try { T('kill-server'); } catch {}
-  fs.rmSync(home, { recursive: true, force: true });
-  fs.rmSync(repo + '.worktrees', { recursive: true, force: true });
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  fs.rmSync(repo + '.worktrees', { recursive: true, force: true, maxRetries: 5 });
 });
 
 test('each terminal gets its own view: switching windows does not move other viewers', async () => {

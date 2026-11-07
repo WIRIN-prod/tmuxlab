@@ -18,5 +18,5 @@ test('repoOf names the repo, branch and worktree of a folder', async () => {
   const w = await repoOf(path.join(wt, 'src'));
   assert.equal(w.repo, 'myapp'); assert.equal(w.branch, 'feat-x'); assert.equal(w.wt, 'feat-x');
   assert.equal(await repoOf(dir), null);
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
 });

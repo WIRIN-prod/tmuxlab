@@ -29,10 +29,10 @@ before(async () => {
   });
   await until(async () => fetch(base + '/').then(() => true, () => false));
 });
-after(() => {
-  srv.kill();
+after(async () => {
+  srv.kill(); await new Promise((r) => srv.exitCode !== null ? r() : srv.once('exit', r)); // the server may still be writing
   try { execFileSync('tmux', ['-L', SOCK, 'kill-server'], { stdio: 'ignore' }); } catch {}
-  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
 });
 
 test('paneStatus: agent step lines win over spinner and input box chrome', () => {
