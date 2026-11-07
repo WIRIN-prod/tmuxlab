@@ -1,11 +1,20 @@
 # tmuxlab
 
-Your tmux sessions from a browser or the Android app: start shells, Claude, Codex, tests or dev servers, close the page, and they keep running inside tmux. One web app in `public/` is served by the server and also ships, unchanged, inside the Android APK (Capacitor, the same setup as home_builder).
+Your tmux sessions from a browser or the Android app: start shells, Claude, Codex, tests or dev servers, close the page, and they keep running inside tmux. One web app in `public/` is served by the server and also ships, unchanged, inside the Android APK (Capacitor).
+
+It gives whoever holds a key a shell as your user, so read [Security](#security) before you expose it to anything.
+
+## Requirements
+
+- Linux (it reads `/proc` for stats and restore), tmux 3.2 or newer, Node.js 20 or newer
+- A C/C++ toolchain and Python for `node-pty` (`build-essential python3` on Debian/Ubuntu)
+- Optional: `git` and `gh` for Changes & PR, Tailscale for phone access away from home, Docker to build the Android app
 
 ## Run it
 
+    git clone https://github.com/WIRIN-prod/tmuxlab && cd tmuxlab
     npm install
-    npm start                      # prints links with your token, e.g. http://192.168.1.6:7681/#token=…
+    npm start                      # prints links with your token, e.g. http://192.168.1.20:7681/#token=…
 
 Open a printed link on any device. That server token only signs devices in: each device then gets its own key, listed in Settings › Devices, where you can remove one without signing out the rest. The server token lives in `~/.config/tmuxlab/token`; Settings › Devices › New server token replaces it (signed-in devices stay signed in).
 
@@ -15,7 +24,7 @@ Keep it running at boot:
 
 ### From your phone, anywhere
 
-Use Tailscale (already on this machine). Either open `http://<tailscale-ip>:7681/#token=…` from the startup links, or get HTTPS, which also lets Chrome install the web app:
+Use [Tailscale](https://tailscale.com). Either open `http://<tailscale-ip>:7681/#token=…` from the startup links, or get HTTPS, which also lets Chrome install the web app:
 
     tailscale serve --bg 7681      # then https://<machine>.<tailnet>.ts.net/#token=…
 
@@ -23,9 +32,11 @@ Don't expose the port to the public internet. The token gives full shell access 
 
 ### Android app
 
+Download the APK from [Releases](https://github.com/WIRIN-prod/tmuxlab/releases), or build your own:
+
     npm run build:android          # signed APK in dist/tmuxlab.apk (Docker, no local Java/SDK)
 
-Install it, then paste a startup link (or address and token) on the connect screen. After that the app updates itself from the machine: `npm run build:android` leaves the new APK in `dist/`, and the next time the app connects it offers **Update** (Android asks once to allow installs from your browser, then before each install). `android/release.jks` and `KEYSTORE_PASSWORD` in `.env` sign every update. Keep copies somewhere other than this machine.
+Install it, then paste a startup link (or address and token) on the connect screen. After that the app updates itself from the machine: `npm run build:android` leaves the new APK in `dist/`, and the next time the app connects it offers **Update** (Android asks once to allow installs from your browser, then before each install). The first build creates your own signing key, `android/release.jks`, with its password in `.env`; it signs every later build, so keep copies somewhere other than this machine. Android only installs an update signed with the same key as the installed app, so to switch between the Releases APK and your own build, uninstall the app first.
 
 ## Using it
 
@@ -36,7 +47,7 @@ Install it, then paste a startup link (or address and token) on the connect scre
 - **Projects**: folders for sessions. **New project** (folder icon) adds one with an optional default folder; each project is a collapsible section on the wall with its own **+ Session** button. Move a session with ⋯ › Move to project, or drag its card onto a project heading on desktop. The project is stored on the tmux session (`@tl_project`), so every device sees the same grouping and it survives renames. Deleting a project keeps its sessions running under No project.
 - **New session**: pick a launcher or a stack and a folder. In a git repo, "Work on a new branch in its own folder" creates a git worktree (`<repo>.worktrees/<branch>`), so several agents can work on the same repo without colliding.
 - **Stacks**: a stack opens several windows and splits at once, e.g. dev server + tests + claude, or claude and codex side by side. Edit them in Settings › Stacks.
-- **Snippets**: in the terminal, Snippets (toolbar on desktop, first extra key on phones) runs a saved command in the focused pane. Add, rename and delete them in Settings > Snippets; every device on that machine shares the list. Recent message-box sends are listed under them. Write `{{name}}` in a snippet for a value it asks for each time, e.g. `git checkout -b {{branch}}`.
+- **Snippets**: in the terminal, Snippets (toolbar on desktop, first extra key on phones) runs a saved command in the focused pane. Add, rename and delete them in Settings > Snippets; every device on that machine shares the list. Write `{{name}}` in a snippet for a value it asks for each time, e.g. `git checkout -b {{branch}}`.
 - **Changes & PR**: the ⎇ branch button in the terminal (or ⋯ › Changes on a card) lists changed files with diffs, then commits, pushes and opens a pull request with `gh`. In a worktree it can also remove the worktree.
 - **Start / Stop**: Stop sends Ctrl+C twice (what Claude and Codex need to exit). Start reruns the pane's launcher command. Restart does both. The session and its shell stay alive either way.
 - **Session tabs**: sessions you open stay as tabs along the top of the terminal, with a dot for running (cyan) or waiting for you (amber) and a mark when there's output you haven't seen. Tap to switch, + to open another, ✕ to close the tab (the session keeps running). Right-click or long-press a tab to rename the session, open it beside the current one, or close other tabs. On a keyboard, Alt+1…9 jumps to a tab and Alt+[ / Alt+] steps through them.
@@ -61,6 +72,17 @@ Config lives in `~/.config/tmuxlab/` (`presets.json`, `projects.json`, `stacks.j
 
 Your existing tmux sessions show up too. Sessions whose names contain characters other than letters, digits, `-`, `_` and `.` are listed but can't be controlled. Rename them first.
 
+## Security
+
+- **One key, full shell.** The server token and every device key run commands as the user running tmuxlab. Device keys are stored hashed; remove a lost phone in Settings › Devices.
+- **Plain HTTP by default.** On a network you don't trust, anyone watching can read the key. Use Tailscale (traffic is encrypted) or `tailscale serve` for HTTPS, or set `HOST=127.0.0.1` and put your own HTTPS proxy in front.
+- **Never forward the port to the internet.**
+- **Saved output.** Search output keeps terminal output on disk for 7 days (owner-only), including any secrets your terminals printed.
+- **ntfy.sh topics are public** to anyone who knows the name; keep the random one or run your own ntfy server.
+- **Public endpoints:** the web page, `/tmuxlab.apk` (no secrets inside) and one-time answer links from alerts. Everything else needs a key.
+
+Found a vulnerability? Report it privately through [GitHub security advisories](https://github.com/WIRIN-prod/tmuxlab/security/advisories/new), not in a public issue.
+
 ## Develop
 
     npm test                       # end-to-end against real tmux on a private socket; never touches your sessions
@@ -68,3 +90,7 @@ Your existing tmux sessions show up too. Sessions whose names contain characters
 Settings: `PORT` (7681), `HOST` (0.0.0.0), `TMUXLAB_HOME` (~/.config/tmuxlab), `TMUXLAB_TOKEN`, `TMUXLAB_SOCKET` (tmux -L name).
 
 Layout: `server.js` (REST + WebSocket, one `tmux attach` pty per viewer through a grouped "view" session, so each device keeps its own window), `lib/` (tmux, git, cron, stats, alert watcher), `public/` (the whole UI as ES modules in `public/js/`, no build step), `scripts/` (vendor copy, icons, APK build, service install), `android/` (Capacitor shell).
+
+## License
+
+[MIT](LICENSE)

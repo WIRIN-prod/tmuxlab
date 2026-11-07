@@ -1,8 +1,26 @@
 {
   "name": "tmuxlab",
   "version": "2.9.2",
-  "description": "",
-  "main": "index.js",
+  "description": "tmux sessions, shells and coding agents from a browser or the Android app",
+  "private": true,
+  "license": "MIT",
+  "author": "WIRIN-prod",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WIRIN-prod/tmuxlab.git"
+  },
+  "keywords": [
+    "tmux",
+    "terminal",
+    "claude-code",
+    "codex",
+    "android",
+    "capacitor"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --test",
     "start": "node server.js",
@@ -11,10 +29,6 @@
     "icons": "node scripts/icons.mjs",
     "pair": "node scripts/pair.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
   "dependencies": {
     "@capacitor/android": "^8.6.0",
     "@capacitor/core": "^8.6.0",
