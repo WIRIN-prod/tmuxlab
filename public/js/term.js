@@ -1,5 +1,5 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
-import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, onBack, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent } from './sheets.js';
 
@@ -128,7 +128,7 @@ function layout() {
     $('.tph', p.el).hidden = T.panes.length < 2;
   }
   requestAnimationFrame(() => T.panes.forEach((p) => { try { p.fit.fit(); } catch {} }));
-  $('#btn-split').hidden = touch && innerWidth < 900 || T.panes.length >= MAX_PANES;
+  $('#btn-split').hidden = touch && innerWidth < 768 || T.panes.length >= MAX_PANES;
 }
 
 function setFocus(i) {
@@ -279,29 +279,36 @@ function allAgents() {
 }
 function renderAgents() {
   const list = allAgents(), cur = focused();
-  const n = list.filter((a) => a.state === 'blocked' || a.state === 'done').length;
+  const n = list.filter((a) => a.state === 'blocked').length;
   $('#t-agents-n').hidden = !n; $('#t-agents-n').textContent = n;
   $('#btn-agents').hidden = !list.length;
   const show = list.length > 0 && agentsOpen();
   $('#t-agents').hidden = !show; $('#btn-agents').setAttribute('aria-expanded', String(show));
   if (!show) return;
-  const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.status?.last, a.w.name]), cur?.s, cur?.win?.index]);
+  const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.prompt?.question, a.p.status?.last, a.w.name]), cur?.s, cur?.win?.index]);
   if ($('#t-agents').dataset.sig === sig) return;
   $('#t-agents').dataset.sig = sig;
   $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button class="ag ag-${a.state}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
     aria-current="${cur?.s === a.s.name && cur?.win?.index === a.w.index}">
     <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}${a.s.windows.length > 1 ? ` › ${esc(a.w.name)}` : ''}</span></span>
     <span class="ag-st">${AG_LABEL[a.state]} · ${ago(a.since / 1000)}</span>
-    ${a.p.status?.last ? `<span class="ag-l">${esc(a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>`;
+    ${a.p.prompt?.question || a.p.status?.last ? `<span class="ag-l">${esc(a.p.prompt?.question || a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>`;
 }
 $('#btn-agents').addEventListener('click', () => {
   if (wide.matches) store.set('agentsPanel', !store.get('agentsPanel', true));
-  else $('#btn-agents').setAttribute('aria-expanded', String(!agentsOpen()));
+  else {
+    const open = !agentsOpen();
+    $('#btn-agents').setAttribute('aria-expanded', String(open));
+    if (open) agentsBack = onBack(closeAgents); else { agentsBack?.(); agentsBack = null; }
+  }
   $('#t-agents').dataset.sig = ''; renderAgents(); layout();
 });
+let agentsBack = null;
+function closeAgents() { agentsBack = null; $('#btn-agents').setAttribute('aria-expanded', 'false'); $('#t-agents').hidden = true; layout(); }
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && agentsBack && !wide.matches && !document.querySelector('dialog[open], .menu')) { e.preventDefault(); agentsBack(); closeAgents(); } }, true); // capture: xterm swallows Esc
 $('#t-agents').addEventListener('click', async (e) => {
   const b = e.target.closest('.ag'); if (!b) return;
-  if (!wide.matches) $('#btn-agents').setAttribute('aria-expanded', 'false');
+  if (!wide.matches && agentsBack) { agentsBack(); closeAgents(); }
   await act(`${W(b.dataset.s, `${b.dataset.w}.${b.dataset.p}`)}/select`).catch(() => {}); // land on the agent's pane, not just its window
   openTerm(b.dataset.s, +b.dataset.w); refresh();
 });
@@ -334,8 +341,9 @@ export function renderTermBar() {
   const ap = activePane(w);
   const tg = $('#w-toggle');
   if (ap.running) { tg.textContent = `Stop ${ap.cmd}`; tg.className = 'btn sm ghost danger'; tg.dataset.a = 'stop'; }
-  else if (ap.preset) { tg.textContent = `Start ${ap.preset.split(' ')[0]}`; tg.className = 'btn sm run'; tg.dataset.a = 'start'; }
+  else if (ap.preset) { tg.textContent = `Start ${ap.preset.split(' ')[0].split('/').pop()}`; tg.className = 'btn sm run'; tg.dataset.a = 'start'; }
   else { tg.textContent = 'Run…'; tg.className = 'btn sm'; tg.dataset.a = 'run'; }
+  tg.title = ap.preset || '';
   $('#w-restart').hidden = !ap.preset;
   const ag = agentOf(ap);
   $('#w-agent').hidden = !ag;
@@ -427,7 +435,7 @@ const cur = () => { const p = focused(); const w = p?.win; return w && { p, w, a
 $('#w-toggle').addEventListener('click', async (e) => {
   const c = cur(); if (!c) return;
   const a = e.currentTarget.dataset.a;
-  if (a === 'stop') { await act(`${c.t}/stop`); toast(`Sent stop to ${c.ap.cmd}`); }
+  if (a === 'stop') { if (!await ask({ title: `Stop ${c.ap.cmd}?`, message: 'Sends Ctrl+C. The session and its shell stay open.', ok: 'Stop', danger: true })) return; await act(`${c.t}/stop`); toast(`Sent stop to ${c.ap.cmd}`); }
   else if (a === 'start') await act(`${c.t}/start`);
   else return menu(e.currentTarget, [
     { label: 'Claude Code…', icon: 'spark', sub: 'new, continue or resume', run: () => openAgent({ kind: 'claude', s: c.p.s, t: c.t, cwd: c.ap.cwd, where: 'pane' }) },

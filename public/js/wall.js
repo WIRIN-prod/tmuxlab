@@ -66,7 +66,7 @@ const visible = () => S.sessions.filter(matches).filter((s) => S.filter === 'all
 function promptHtml(s, w) {
   const p = w.panes.find((x) => x.prompt);
   return `<div class="ask" data-t="${w.index}.${p.index}"><div class="aq"><span class="dot ask-dot"></span><b>${esc(w.name)}</b> ${esc(p.prompt.question)}</div>
-    <div class="aopts">${p.prompt.options.map((o) => `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label.length > 34 ? o.label.slice(0, 32) + '…' : o.label)}</button>`).join('')}</div></div>`;
+    <div class="aopts">${p.prompt.options.map((o) => `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label)}</button>`).join('')}</div></div>`;
 }
 
 const FOLDER = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 014.5 5h4.3l2 2.2h8.7A1.5 1.5 0 0121 8.7v9.8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18.5z" fill="currentColor" opacity=".85"/></svg>';
@@ -80,7 +80,9 @@ export function renderWall() {
   const grid = $('#grid');
   grid.classList.toggle('list', view === 'list');
   const list = visible();
-  $('#noresults').hidden = !$('#q').value.trim() || list.length > 0;
+  const q = $('#q').value.trim();
+  $('#noresults').hidden = list.length > 0 || !S.sessions.length || !q && S.filter === 'all';
+  $('#noresults').textContent = q ? 'No sessions match your search.' : { waiting: 'Nothing needs you right now.', running: 'Nothing is running.', idle: 'No idle sessions.' }[S.filter] || '';
   renderMachines();
   // with projects, the wall is a set of folders; without, just cards
   const nodes = [];
@@ -195,11 +197,11 @@ $('#grid').addEventListener('click', async (e) => {
   const a = e.target.closest('[data-a]')?.dataset.a;
   const aw = activeWin(s);
   if (a === 'open') openTerm(s.name);
-  else if (a === 'stop') { const b = e.target.closest('[data-a]'); await act(`${W(s.name, b.dataset.t)}/stop`); toast(`Sent ${b.textContent.toLowerCase()}`); setTimeout(refresh, 600); }
+  else if (a === 'stop') { const b = e.target.closest('[data-a]'); if (!await ask({ title: `${b.getAttribute('aria-label')}?`, message: `Sends Ctrl+C to ${s.name}. Its session stays open.`, ok: 'Stop', danger: true })) return; await act(`${W(s.name, b.dataset.t)}/stop`); toast(`Sent ${b.textContent.toLowerCase()}`); setTimeout(refresh, 600); }
   else if (a === 'start') { await act(`${W(s.name, aw.index)}/start`); toast(`Started ${aw.preset}`); setTimeout(refresh, 600); }
   else if (a === 'more') menu(e.target.closest('button'), [
     ...(() => { const rp = aw.panes.find((x) => x.running && x.active) || aw.panes.find((x) => x.running);
-      return rp ? [{ label: `Stop ${rp.cmd}`, icon: 'x', run: async () => { await act(`${W(s.name, `${aw.index}.${rp.index}`)}/stop`); toast(`Sent stop to ${rp.cmd}`); setTimeout(refresh, 600); } }]
+      return rp ? [{ label: `Stop ${rp.cmd}`, icon: 'x', run: async () => { if (!await ask({ title: `Stop ${rp.cmd}?`, message: `Sends Ctrl+C to ${s.name}. Its session stays open.`, ok: 'Stop', danger: true })) return; await act(`${W(s.name, `${aw.index}.${rp.index}`)}/stop`); toast(`Sent stop to ${rp.cmd}`); setTimeout(refresh, 600); } }]
         : aw.preset ? [{ label: `Start ${aw.preset.split(' ')[0]}`, icon: 'play', run: async () => { await act(`${W(s.name, aw.index)}/start`); toast(`Started ${aw.preset}`); setTimeout(refresh, 600); } }] : []; })(),
     ...(aw.panes.some((x) => x.running) ? [] : [
       { label: 'Start Claude Code…', icon: 'spark', run: () => openAgent({ kind: 'claude', s: s.name, t: W(s.name, aw.index), cwd: activePane(aw).cwd, where: 'pane' }) },
@@ -390,6 +392,10 @@ $('#machine').addEventListener('click', async (e) => {
   ]);
 });
 
+// in a terminal Ctrl+K belongs to the shell (kill line), so Ctrl+Shift+K opens the palette there; capture beats xterm
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'k' && !document.querySelector('dialog[open]')) { e.preventDefault(); e.stopPropagation(); openPalette(); }
+}, true);
 document.addEventListener('keydown', (e) => {
   if ($('#wall').hidden || document.querySelector('dialog[open]')) return;
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openPalette(); }

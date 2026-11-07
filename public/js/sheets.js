@@ -497,7 +497,11 @@ $('#rp-body').addEventListener('click', async (e) => {
 // each session gets it in the pane running an agent, else its active pane
 const AGENTS = /^(claude|codex|aider|gemini|opencode|amp)$/;
 function bcTarget(s) {
-  for (const w of s.windows) { const p = w.panes.find((x) => x.agent || AGENTS.test(x.cmd)); if (p) return { w: `${w.index}.${p.index}`, what: p.cmd, agent: true }; }
+  for (const w of s.windows) {
+    const p = w.panes.find((x) => x.agent || AGENTS.test(x.cmd));
+    // a session waiting on a question isn't ticked: typed text plus Enter could pick its highlighted answer
+    if (p) return p.prompt || p.agent?.state === 'blocked' ? { w: `${w.index}.${p.index}`, what: `${p.cmd} · waiting for an answer`, agent: false } : { w: `${w.index}.${p.index}`, what: p.cmd, agent: true };
+  }
   const w = activeWin(s), p = activePane(w);
   return { w: `${w.index}.${p.index}`, what: p.running ? p.cmd : 'shell', agent: false };
 }
