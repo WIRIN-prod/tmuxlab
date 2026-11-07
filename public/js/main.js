@@ -110,9 +110,13 @@ async function adoptDevice(info) {
 // the app: when the machine has a newer APK, offer it (Android asks before installing)
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
 function offerUpdate(info) {
-  if (!isApp || !info.apk || !newer(info.apk, VERSION)) return;
-  toast(`tmuxlab ${info.apk} is ready`, false, { action: 'Update', run: () => window.open(cfg().base + '/tmuxlab.apk', '_blank') });
+  const on = isApp && !!info?.apk && newer(info.apk, VERSION);
+  $('#update').hidden = !on;
+  if (on) $('#up-title').textContent = `tmuxlab ${info.apk} is ready (you have ${VERSION})`;
 }
+$('#up-go').addEventListener('click', () => window.open(cfg().base + '/tmuxlab.apk', '_blank'));
+// reopening the app resumes it rather than restarting it, so check again whenever it comes back
+document.addEventListener('visibilitychange', () => { if (isApp && !document.hidden && cfg()) api('/api/info').then(offerUpdate, () => {}); });
 
 // after a reboot: the sessions that were open before, one tap away
 async function offerRestore() {

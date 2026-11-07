@@ -106,6 +106,10 @@
     </div>
   </header>
   <div class="offline" id="offline" role="alert" hidden><svg class="ico" aria-hidden="true"><use href="#i-wifi-off"/></svg><span id="offline-msg">Can't reach this machine. Showing the last known state.</span><button class="btn sm" id="offline-retry">Retry</button></div>
+  <div class="restore" id="update" role="region" aria-label="App update" hidden>
+    <p><b id="up-title"></b><br><span class="muted small">Android asks before installing. Your machines and settings stay.</span></p>
+    <div class="row"><button class="btn sm primary" id="up-go">Update</button></div>
+  </div>
   <div class="restore" id="restore" role="region" aria-label="Restore sessions" hidden>
     <p><b id="rs-title"></b><br><span class="muted small" id="rs-list"></span></p>
     <label class="check small"><input type="checkbox" id="rs-run" checked> Start their programs again (agents continue their last conversation)</label>
