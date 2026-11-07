@@ -334,6 +334,7 @@ export async function openSettings(tab = 'alerts') {
   $('#set-server').textContent = `${cfg().name || S.info?.host || ''} · ${cfg().base}`;
   $('#set-presets').value = JSON.stringify(S.presets, null, 2);
   $('#set-stacks').value = JSON.stringify(S.stacks, null, 2);
+  renderSnips(S.snippets);
   $('#set-theme').innerHTML = Object.keys(THEMES).map((k) => `<option value="${k}">${k[0].toUpperCase() + k.slice(1)}</option>`).join('');
   $('#set-theme').value = T.theme;
   $('#set-font').value = T.fontSize;
@@ -351,6 +352,23 @@ function setTab(t) {
   for (const b of $$('#set-tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === t);
   for (const p of $$('#settings-form [data-pane]')) p.hidden = p.dataset.pane !== t;
 }
+// snippets editor: one row per command, a name is optional
+const snipRow = (s) => `<li><input class="sn-l" value="${esc(s.label || '')}" placeholder="Name (optional)" aria-label="Snippet name" maxlength="60">
+  <input class="sn-c mono" value="${esc(s.cmd)}" placeholder="Command, e.g. git pull --rebase" aria-label="Command" spellcheck="false" autocapitalize="off" autocomplete="off">
+  <button type="button" class="btn ghost icon" data-del aria-label="Delete snippet">${icon('trash')}</button></li>`;
+function renderSnips(list) {
+  $('#snip-list').innerHTML = list.map(snipRow).join('') || '<li class="muted empty-row">No snippets yet.</li>';
+}
+const readSnips = () => $$('#snip-list li:not(.empty-row)').map((li) => ({ label: $('.sn-l', li).value.trim(), cmd: $('.sn-c', li).value.trim() })).filter((s) => s.cmd);
+$('#snip-add').addEventListener('click', () => {
+  $('#snip-list .empty-row')?.remove();
+  $('#snip-list').insertAdjacentHTML('beforeend', snipRow({ cmd: '' }));
+  $('#snip-list li:last-child .sn-c').focus();
+});
+$('#snip-list').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-del]')?.closest('li'); if (!li) return;
+  li.remove(); if (!$('#snip-list li')) renderSnips([]);
+});
 $('#set-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
 $('#al-gen').addEventListener('click', () => {
   $('#al-url').value = `https://ntfy.sh/tmuxlab-${crypto.getRandomValues(new Uint32Array(2)).reduce((a, n) => a + n.toString(36), '')}`;
@@ -367,7 +385,8 @@ $('#set-save').addEventListener('click', async () => {
   const parse = (id, name) => { try { return JSON.parse($(id).value); } catch (e) { throw new Error(`${name}: not valid JSON (${e.message})`); } };
   try {
     const presets = parse('#set-presets', 'Launchers'), stacks = parse('#set-stacks', 'Stacks');
-    [S.presets, S.stacks] = await Promise.all([api('/api/config/presets', { method: 'PUT', body: presets }), api('/api/config/stacks', { method: 'PUT', body: stacks })]);
+    [S.presets, S.stacks, S.snippets] = await Promise.all([api('/api/config/presets', { method: 'PUT', body: presets }), api('/api/config/stacks', { method: 'PUT', body: stacks }),
+      api('/api/config/snippets', { method: 'PUT', body: readSnips() })]);
     await saveAlerts();
     setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked);
     dSet.close(); toast('Settings saved');

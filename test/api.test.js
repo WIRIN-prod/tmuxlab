@@ -121,3 +121,11 @@ test('websocket terminal: auth, output, input', async () => {
   ws.close();
   await api('/api/sessions/ws', 'DELETE');
 });
+
+test('snippets round-trip and reject empty commands', async () => {
+  const p = [{ label: 'Pull', cmd: 'git pull --rebase' }, { label: '', cmd: 'ls -la' }];
+  assert.deepEqual((await api('/api/config/snippets')).body, []);
+  assert.equal((await api('/api/config/snippets', 'PUT', [{ label: 'x', cmd: '  ' }])).status, 400);
+  assert.deepEqual((await api('/api/config/snippets', 'PUT', p)).body, p);
+  assert.deepEqual((await api('/api/config/snippets')).body, p);
+});

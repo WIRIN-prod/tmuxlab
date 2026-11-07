@@ -11,7 +11,7 @@ export const touch = matchMedia('(pointer: coarse)').matches;
 
 export const S = {
   machines: store.get('machines', null), cur: store.get('cur', 0),
-  sessions: [], presets: [], stacks: [], projects: [], stats: null, info: null, filter: store.get('filter', 'all'), previews: {},
+  sessions: [], presets: [], stacks: [], snippets: [], projects: [], stats: null, info: null, filter: store.get('filter', 'all'), previews: {},
 };
 // tmuxlab 1.0/1.1 kept a single {base, token}
 if (!S.machines) { const old = store.get('cfg', null); S.machines = old ? [{ name: '', ...old }] : []; }

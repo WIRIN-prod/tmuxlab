@@ -252,7 +252,7 @@ dialog[open]::backdrop { animation: fade-in var(--t-enter) var(--ease-out); }
 @keyframes fade-in { from { opacity: 0; } }
 .sheet { width: 520px; }
 .sheet.wide { width: 760px; }
-.sheet form, .sheet-in { padding: 20px; display: grid; gap: 14px; }
+.sheet form, .sheet-in { padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .sheet h2 { margin: 0; font-size: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg { display: flex; gap: 2px; background: var(--bg); padding: 3px; border-radius: var(--r-md); overflow-x: auto; scrollbar-width: none; }
 .seg [role=tab] { flex: 1; background: none; border: 0; padding: 6px 10px; border-radius: var(--r-sm); color: var(--muted); cursor: pointer; white-space: nowrap; min-height: var(--tap); }
@@ -477,3 +477,10 @@ code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; b
   body.nav-open .nav { visibility: visible; transition-delay: 0s; }
 }
 .srow .where { overflow: hidden; }
+
+/* settings: snippets editor */
+.snip-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.snip-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }
+.snip-list li.empty-row { display: block; padding: 8px 0; }
+@media (max-width: 640px) { .snip-list li { grid-template-columns: minmax(0, 1fr) auto; } .snip-list .sn-c { grid-column: 1; grid-row: 2; } .snip-list [data-del] { grid-row: 1 / 3; grid-column: 2; } .snip-list li + li { border-top: 1px solid var(--line); padding-top: 8px; } }
+@media (max-width: 640px) { #settings-form > .row:last-child { flex-wrap: wrap; } #set-logout { order: 9; flex-basis: 100%; justify-content: center; } }

@@ -254,6 +254,7 @@
     <div class="seg" id="set-tabs" role="tablist">
       <button type="button" role="tab" data-tab="alerts">Phone alerts</button>
       <button type="button" role="tab" data-tab="launchers">Launchers</button>
+      <button type="button" role="tab" data-tab="snippets">Snippets</button>
       <button type="button" role="tab" data-tab="stacks">Stacks</button>
       <button type="button" role="tab" data-tab="look">Appearance</button>
     </div>
@@ -269,6 +270,11 @@
     </div>
     <div data-pane="launchers" class="pane" hidden>
       <label>Launchers <span class="muted">(JSON: id, label, cmd, icon)</span><textarea id="set-presets" rows="14" spellcheck="false"></textarea></label>
+    </div>
+    <div data-pane="snippets" class="pane" hidden>
+      <p class="muted">Commands you run often. Pick one from Snippets in a terminal and it is typed and run in the focused pane. Every device connected to this machine shares the list.</p>
+      <ul id="snip-list" class="snip-list"></ul>
+      <div><button type="button" class="btn sm" id="snip-add"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg>Add snippet</button></div>
     </div>
     <div data-pane="stacks" class="pane" hidden>
       <label>Stacks <span class="muted">(JSON: id, label, icon, windows: [{preset or cmd, label, split: right|down}])</span><textarea id="set-stacks" rows="14" spellcheck="false"></textarea></label>

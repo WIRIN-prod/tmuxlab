@@ -69,9 +69,9 @@ export async function start() {
   S.sessions = []; S.previews = {}; S.stats = null;
   $('#grid').replaceChildren();
   try {
-    const [info, presets, stacks, projects] = await Promise.all([api('/api/info'), api('/api/config/presets'), api('/api/config/stacks'),
-      api('/api/config/projects').catch(() => [])]); // a 1.x server has no projects
-    Object.assign(S, { info, presets, stacks, projects });
+    const [info, presets, stacks, projects, snippets] = await Promise.all([api('/api/info'), api('/api/config/presets'), api('/api/config/stacks'),
+      api('/api/config/projects').catch(() => []), api('/api/config/snippets').catch(() => [])]); // older servers lack projects/snippets
+    Object.assign(S, { info, presets, stacks, projects, snippets });
     document.title = `tmuxlab · ${cfg().name || info.host}`;
   } catch (e) {
     return showLogin(e instanceof Unauthorized ? e.message : `Could not reach ${cfg().base}. Check the server is running.`, S.machines.length > 1);

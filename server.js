@@ -189,8 +189,8 @@ const routes = [
     const rows = (await listPanes()).filter((x) => !VIEW_RE.test(x.session_name));
     return stats(rows.map((x) => ({ session: x.session_name, pid: +x.pane_pid })));
   }],
-  ['GET', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects)'), ([n]) => loadConf(n)],
-  ['PUT', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects)'), ([n], b) => {
+  ['GET', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects|snippets)'), ([n]) => loadConf(n)],
+  ['PUT', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects|snippets)'), ([n], b) => {
     if (n === 'schedules') for (const s of Array.isArray(b) ? b : []) try { parseCron(s.cron); } catch (e) { throw httpErr(400, `${s.label}: ${e.message}`); }
     return saveConf(n, b);
   }],

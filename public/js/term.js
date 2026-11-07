@@ -1,7 +1,7 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
 import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
-import { openNew, openChanges, openFind, pickWindow } from './sheets.js';
+import { openNew, openChanges, openFind, pickWindow, openSettings } from './sheets.js';
 
 export const THEMES = {
   ink: { background: '#070D18', foreground: '#E2E9F6', cursor: '#5B9BFF', cursorAccent: '#070D18', selectionBackground: '#5B9BFF55',
@@ -427,11 +427,15 @@ function applyMods(d) {
 }
 export const sendInput = (d) => focused()?.send(d);
 const paste = (t) => sendInput(t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t);
-// snippets: the launcher commands plus what was recently sent from the message box, typed and run in the focused pane
+// snippets: saved ones (Settings > Snippets), then recent message-box sends; typed and run in the focused pane
 function snippets(anchor) {
-  const cmds = [...new Set([...S.presets.map((p) => p.cmd).filter(Boolean), ...store.get('sent', [])])].slice(0, 16);
-  if (!cmds.length) return toast('No snippets yet. Commands you send from the message box show up here.');
-  menu(anchor, cmds.map((c) => ({ label: c.length > 48 ? c.slice(0, 46) + '…' : c, icon: 'snippet', run: () => { paste(c); setTimeout(() => sendInput('\r'), 30); } })));
+  const cut = (c) => (c.length > 48 ? c.slice(0, 46) + '…' : c);
+  const run = (c) => () => { paste(c); setTimeout(() => sendInput('\r'), 30); };
+  const saved = S.snippets.map((s) => ({ label: s.label || cut(s.cmd), sub: s.label ? cut(s.cmd) : '', icon: 'snippet', run: run(s.cmd) }));
+  const recent = store.get('sent', []).filter((c) => !S.snippets.some((s) => s.cmd === c)).slice(0, 8)
+    .map((c) => ({ label: cut(c), icon: 'refresh', run: run(c) }));
+  menu(anchor, [...saved, ...(saved.length && recent.length ? ['-'] : []), ...recent, ...(saved.length || recent.length ? ['-'] : []),
+    { label: saved.length ? 'Edit snippets…' : 'Add snippets…', icon: 'edit', run: () => openSettings('snippets') }]);
 }
 function renderKeys() {
   $('#keys').innerHTML = KEYS.map((k, i) => k === 'sep' ? '<span class="sep"></span>'
