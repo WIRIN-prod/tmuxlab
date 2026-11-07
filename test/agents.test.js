@@ -97,3 +97,72 @@ test('a question alert carries one-time answer buttons that work once', async ()
     assert.equal((await fetch(links[0], { method: 'POST' })).status, 410, 'the other button is spent too');
   } finally { ntfy.close(); }
 });
+
+test('devices get their own keys; view links only watch one session; removed keys stop working', async () => {
+  const as = (tok) => async (p, method = 'GET', body) => {
+    const r = await fetch(base + p, { method, headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+    return { status: r.status, body: await r.json() };
+  };
+  assert.equal((await api('/api/info')).body.auth, 'server');
+  const phone = (await api('/api/devices', 'POST', { name: 'Pixel' })).body;
+  const P = as(phone.token);
+  assert.equal((await P('/api/info')).body.auth, 'device');
+  assert.equal((await P('/api/devices')).body.self, phone.id);
+  assert.ok(!JSON.stringify((await P('/api/devices')).body).includes('hash'), 'key hashes stay on the server');
+
+  await api('/api/sessions', 'POST', { name: 'seen', cwd: home });
+  await api('/api/sessions', 'POST', { name: 'hidden', cwd: home });
+  assert.equal((await P('/api/share', 'POST', { session: 'nope', hours: 2 })).status, 404);
+  assert.equal((await P('/api/share', 'POST', { session: 'seen', hours: 999 })).status, 400);
+  const link = (await P('/api/share', 'POST', { session: 'seen', hours: 2 })).body;
+  const V = as(link.token);
+  assert.equal((await V('/api/info')).body.role, 'view');
+  assert.deepEqual((await V('/api/sessions')).body.map((s) => s.name), ['seen']);
+  assert.equal((await V('/api/windows/seen/0/capture')).status, 403);
+  assert.equal((await V('/api/sessions', 'POST', { name: 'x', cwd: home })).status, 403);
+  const { WebSocket } = await import('ws');
+  const ws = (tok, s) => new Promise((res) => { const w = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${tok}&s=${s}`); w.on('open', () => { w.close(); res('open'); }); w.on('error', () => res('refused')); });
+  assert.equal(await ws(link.token, 'hidden'), 'refused');
+  assert.equal(await ws(link.token, 'seen'), 'open');
+
+  assert.equal((await api('/api/token/rotate', 'POST')).status, 400, 'a token set by TMUXLAB_TOKEN is not rotated');
+  assert.equal((await api(`/api/devices/${phone.id}`, 'DELETE')).status, 200);
+  assert.equal((await P('/api/info')).status, 401);
+  assert.equal((await V('/api/info')).status, 200, 'other keys keep working');
+});
+
+test('after a reboot, sessions come back with their windows, splits and commands', async () => {
+  const { again } = await import('../lib/restore.js');
+  assert.equal(again({ run: true, cmd: 'claude', tl: 'claude --resume abc-1 --fork-session --permission-mode plan' }), 'claude --permission-mode plan --continue');
+  assert.equal(again({ run: true, cmd: 'codex', tl: '' }), 'codex resume --last');
+  assert.equal(again({ run: false, cmd: 'bash', tl: 'npm run dev' }), '', 'stopped commands stay stopped');
+  const pane = (o) => ({ cwd: home, cmd: 'bash', tl: '', active: false, run: false, ...o });
+  fs.writeFileSync(path.join(home, 'conf', 'snapshot.json'), JSON.stringify({ boot: 'an-earlier-boot', at: Date.now() - 3600e3, sessions: [
+    { name: 'seen', project: '', windows: [{ index: 0, name: 'x', layout: '', active: true, panes: [pane({ active: true })] }] }, // still running: skipped
+    { name: 'back', project: 'work', windows: [
+      { index: 0, name: 'agent', layout: '', active: false, panes: [pane({ cmd: 'claude', tl: 'claude --permission-mode plan', run: true, active: true })] },
+      { index: 1, name: 'dev', layout: '', active: true, panes: [pane({ cmd: 'python3', tl: 'sleep 300', run: true }), pane({ cwd: '/no/such/dir', active: true })] },
+    ] }] }));
+  const o = (await api('/api/restore')).body;
+  assert.deepEqual(o.sessions.map((s) => [s.name, s.windows, s.run]), [['back', 2, ['claude --permission-mode plan --continue', 'sleep 300']]]);
+  assert.deepEqual((await api('/api/restore', 'POST', {})).body, { restored: ['back'] });
+  const s = (await api('/api/sessions')).body.find((x) => x.name === 'back');
+  assert.equal(s.project, 'work');
+  assert.deepEqual(s.windows.map((w) => [w.name, w.panes.length, w.active]), [['agent', 1, false], ['dev', 2, true]]);
+  assert.deepEqual(s.windows.flatMap((w) => w.panes.map((p) => p.preset)), ['claude --permission-mode plan --continue', 'sleep 300', '']);
+  assert.equal((await api('/api/restore')).body, null, 'offered once');
+});
+
+test('output of every session is searchable, and kept after a session ends', async () => {
+  await api('/api/sessions', 'POST', { name: 'loud', cwd: home, cmd: 'echo needle-4711 here' });
+  const live = await until(async () => (await api('/api/logs/search?q=NEEDLE-4711')).body.find((x) => x.s === 'loud'));
+  assert.equal(live.live, true);
+  assert.ok(live.hits.some((h) => h.line.includes('needle-4711 here')));
+  assert.equal((await api('/api/sessions/loud', 'DELETE')).status, 200);
+  const kept = (await api('/api/logs/search?q=needle-4711')).body.find((x) => x.s === 'loud');
+  assert.equal(kept.live, false);
+  const log = (await api(`/api/logs/${kept.log}`)).body;
+  assert.match(log.text, /needle-4711 here/);
+  assert.equal((fs.statSync(path.join(home, 'conf', 'logs', kept.log)).mode & 0o777), 0o600);
+  assert.equal((await api('/api/logs/..%2Ftoken')).status, 404);
+});

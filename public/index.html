@@ -84,6 +84,9 @@
     <button class="nav-item" id="btn-addmachine"><span class="tile ghost"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></span><span>Add machine</span></button>
     <div class="nav-sec">Workspace</div>
     <button class="nav-item" id="btn-palette" title="Jump to (Ctrl+K)"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><span>Jump to…</span><kbd>Ctrl K</kbd></button>
+    <button class="nav-item" id="btn-logs"><svg class="ico" aria-hidden="true"><use href="#i-terminal"/></svg><span>Search output</span></button>
+    <button class="nav-item" id="btn-repos"><svg class="ico" aria-hidden="true"><use href="#i-branch"/></svg><span>Repos</span></button>
+    <button class="nav-item" id="btn-bcast"><svg class="ico" aria-hidden="true"><use href="#i-layers"/></svg><span>Send to several</span></button>
     <button class="nav-item" id="btn-sched"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg><span>Schedules</span></button>
     <button class="nav-item" id="btn-settings"><svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg><span>Settings</span></button>
     <div class="nav-foot" id="stats"></div>
@@ -103,6 +106,11 @@
     </div>
   </header>
   <div class="offline" id="offline" role="alert" hidden><svg class="ico" aria-hidden="true"><use href="#i-wifi-off"/></svg><span id="offline-msg">Can't reach this machine. Showing the last known state.</span><button class="btn sm" id="offline-retry">Retry</button></div>
+  <div class="restore" id="restore" role="region" aria-label="Restore sessions" hidden>
+    <p><b id="rs-title"></b><br><span class="muted small" id="rs-list"></span></p>
+    <label class="check small"><input type="checkbox" id="rs-run" checked> Start their programs again (agents continue their last conversation)</label>
+    <div class="row"><button class="btn sm primary" id="rs-go">Restore sessions</button><button class="btn sm ghost" id="rs-no">Not now</button></div>
+  </div>
   <div class="filters">
     <div id="filters" role="tablist" aria-label="Show sessions">
       <button role="tab" data-f="all" aria-selected="true">All</button>
@@ -267,6 +275,7 @@
       <button type="button" role="tab" data-tab="snippets">Snippets</button>
       <button type="button" role="tab" data-tab="stacks">Stacks</button>
       <button type="button" role="tab" data-tab="look">Appearance</button>
+      <button type="button" role="tab" data-tab="devices">Devices</button>
     </div>
     <div data-pane="alerts" class="pane">
       <p class="muted">Alerts go through <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>. Install the ntfy app, subscribe to your topic, and the server pushes to your phone even when tmuxlab is closed. Anyone who knows a topic name can read it, so keep the random one.</p>
@@ -275,6 +284,7 @@
       <label class="check"><input type="checkbox" id="al-prompts"> An agent asks a question</label>
       <label class="check"><input type="checkbox" id="al-quiet"> An agent goes quiet after working for <input type="number" id="al-secs" min="5" max="3600" class="num-in" aria-label="seconds"> s</label>
       <label class="check"><input type="checkbox" id="al-finished"> A launched command finishes</label>
+      <label class="check"><input type="checkbox" id="al-machine"> This machine's disk or memory is over 90% full, or its CPU is busy for 5 minutes</label>
       <label>Programs that count as agents<input id="al-agents" spellcheck="false" autocapitalize="off"></label>
       <p class="muted small" id="al-actions">When an agent asks a question, the alert has buttons that answer it. They work while your phone can reach this machine.</p>
       <div><button type="button" class="btn sm" id="al-test">Send test alert</button></div>
@@ -283,7 +293,7 @@
       <label>Launchers <span class="muted">(JSON: id, label, cmd, icon)</span><textarea id="set-presets" rows="14" spellcheck="false"></textarea></label>
     </div>
     <div data-pane="snippets" class="pane" hidden>
-      <p class="muted">Commands you run often. Pick one from Snippets in a terminal and it is typed and run in the focused pane. Every device connected to this machine shares the list.</p>
+      <p class="muted">Commands you run often. Pick one from Snippets in a terminal and it is typed and run in the focused pane. Every device connected to this machine shares the list. Write <code>{{name}}</code> for a value to fill in each time, e.g. <code>git checkout -b {{branch}}</code>.</p>
       <ul id="snip-list" class="snip-list"></ul>
       <div><button type="button" class="btn sm" id="snip-add"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg>Add snippet</button></div>
     </div>
@@ -296,6 +306,12 @@
         <label>Text size<input type="number" id="set-font" min="8" max="28"></label>
       </div>
       <label class="check"><input type="checkbox" id="set-awake"> Keep the screen on while a terminal is open</label>
+    </div>
+    <div data-pane="devices" class="pane" hidden>
+      <p class="muted">Each phone, browser and view link has its own key. Remove one and it is signed out at once; the others keep working.</p>
+      <ul id="dev-list" class="dev-list"></ul>
+      <p class="muted small">The server token (printed when the server starts) only signs new devices in. If it may have leaked, make a new one: signed-in devices stay signed in, old links and QR codes stop working.</p>
+      <div><button type="button" class="btn sm danger" id="dev-rotate">New server token</button></div>
     </div>
     <p id="set-err" class="err" role="alert"></p>
     <div class="row">
@@ -334,9 +350,51 @@
 <dialog id="dlg-pair" class="sheet" aria-labelledby="pair-t">
   <div class="sheet-in">
     <div class="row"><h2 id="pair-t">Pair a phone</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
-    <p class="muted">Scan this with the tmuxlab app (Add machine › Scan QR code) or the phone's camera. It contains this machine's token, so whoever scans it gets full access. Don't share screenshots of it.</p>
+    <p class="muted">Scan this with the tmuxlab app (Add machine › Scan QR code) or the phone's camera. Whoever scans it gets full access, so don't share screenshots of it. Each code is a new device you can remove in Settings › Devices.</p>
     <div class="qr" id="pair-qr"></div>
     <p class="mono small muted" id="pair-url"></p>
+  </div>
+</dialog>
+<dialog id="dlg-logs" class="sheet wide" aria-labelledby="lg-t">
+  <div class="sheet-in">
+    <div class="row"><h2 id="lg-t">Search output</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <form id="lg-form" class="pathrow" role="search"><input id="lg-q" type="search" placeholder="Error text, a file name, a command…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search output"><button class="btn sm primary" id="lg-go">Search</button></form>
+    <p class="muted small" id="lg-note">Searches what every session printed: the last 5,000 lines of each pane, including sessions that have ended (kept 7 days).</p>
+    <div id="lg-body" aria-live="polite"></div>
+  </div>
+</dialog>
+<dialog id="dlg-repos" class="sheet wide" aria-labelledby="rp-t">
+  <div class="sheet-in">
+    <div class="row"><h2 id="rp-t">Repos</h2><span class="spacer"></span><button type="button" class="btn ghost icon" id="rp-refresh" aria-label="Refresh"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg></button><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <p class="muted small">Every repo your sessions work in, with each worktree: a branch checked out in its own folder, so several agents can work on separate tasks at once.</p>
+    <div id="rp-body"></div>
+  </div>
+</dialog>
+<dialog id="dlg-bcast" class="sheet" aria-labelledby="bc-t">
+  <form method="dialog" class="sheet-in" id="bc-form">
+    <div class="row"><h2 id="bc-t">Send to several sessions</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <label>Message<textarea id="bc-text" rows="4" placeholder="e.g. run the tests and fix what fails" spellcheck="true"></textarea></label>
+    <fieldset class="bc-to"><legend>Send to <button type="button" class="btn sm ghost" id="bc-agents">Agents</button><button type="button" class="btn sm ghost" id="bc-all">All</button><button type="button" class="btn sm ghost" id="bc-none">None</button></legend>
+      <ul id="bc-list" class="bc-list"></ul>
+    </fieldset>
+    <label class="check"><input type="checkbox" id="bc-enter" checked> Press Enter after the message</label>
+    <p class="err" id="bc-err" role="alert"></p>
+    <div class="row"><span class="spacer"></span><button type="button" class="btn ghost" data-close>Cancel</button><button type="submit" class="btn primary" id="bc-go">Send</button></div>
+  </form>
+</dialog>
+<dialog id="dlg-share" class="sheet" aria-labelledby="share-t">
+  <div class="sheet-in">
+    <div class="row"><h2 id="share-t">Share a watch link</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <p class="muted">Anyone with the link can watch <b id="share-s"></b> live but can't type or see other sessions. Remove it any time in Settings › Devices.</p>
+    <div class="seg" id="share-h" role="radiogroup" aria-label="Link lasts">
+      <button type="button" role="radio" data-h="1">1 hour</button><button type="button" role="radio" data-h="8" aria-checked="true">8 hours</button><button type="button" role="radio" data-h="24">1 day</button><button type="button" role="radio" data-h="168">1 week</button>
+    </div>
+    <div><button type="button" class="btn primary" id="share-go">Make link</button></div>
+    <div id="share-out" hidden>
+      <div class="pathrow"><input id="share-url" readonly class="mono" aria-label="Watch link"><button type="button" class="btn sm" id="share-copy">Copy</button></div>
+      <div class="qr" id="share-qr"></div>
+    </div>
+    <p class="err" id="share-err" role="alert"></p>
   </div>
 </dialog>
 <dialog id="dlg-scan" class="sheet" aria-labelledby="scan-t">

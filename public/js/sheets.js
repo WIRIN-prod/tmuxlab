@@ -404,14 +404,182 @@ $('#ag-go').addEventListener('click', () => busy($('#ag-go'), async () => {
 }));
 
 // ---------- pair a phone: this machine's link as a QR code ----------
-$('#set-pair').addEventListener('click', () => {
-  let base = cfg().base;
-  if (isLocal(base) && S.info?.addrs?.length) { const u = new URL(base); u.hostname = S.info.addrs[0]; base = u.origin; } // a phone can't reach "localhost"
-  const url = `${base}/#token=${cfg().token}`;
+// an address other devices can reach: "localhost" means nothing to a phone
+const reachable = () => {
+  const base = cfg().base;
+  if (!isLocal(base) || !S.info?.addrs?.length) return base;
+  const u = new URL(base); u.hostname = S.info.addrs[0]; return u.origin;
+};
+// each QR is a new device key, so a lost phone can be removed on its own
+$('#set-pair').addEventListener('click', () => busy($('#set-pair'), async () => {
+  const base = reachable();
+  const d = await act('/api/devices', { name: 'Paired device' });
+  const url = `${base}/#token=${d.token}`;
   const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
   $('#pair-qr').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 3, scalable: true });
   $('#pair-url').textContent = isLocal(base) ? 'This page was opened as localhost, which a phone cannot reach. Open tmuxlab by its network address, or run npm run pair.' : base;
   $('#dlg-pair').showModal();
+  renderDevices();
+}));
+
+// ---------- search output: all sessions, live and ended ----------
+const dLg = $('#dlg-logs');
+let lgQ = '';
+const mark = (line, q) => { const i = line.toLowerCase().indexOf(q.toLowerCase()); return i < 0 ? esc(line) : `${esc(line.slice(0, i))}<mark>${esc(line.slice(i, i + q.length))}</mark>${esc(line.slice(i + q.length))}`; };
+export function openLogs() { $('#lg-body').innerHTML = ''; dLg.showModal(); $('#lg-q').focus(); }
+$('#lg-form').addEventListener('submit', (e) => { e.preventDefault(); busy($('#lg-go'), async () => {
+  lgQ = $('#lg-q').value.trim();
+  if (lgQ.length < 2) { $('#lg-body').innerHTML = '<p class="muted">Type at least 2 characters.</p>'; return; }
+  let res;
+  try { res = await api('/api/logs/search?q=' + encodeURIComponent(lgQ), { timeout: 30000 }); } catch (err) { $('#lg-body').innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
+  $('#lg-body').innerHTML = res.length ? res.map((r) => `<section class="lg">
+    <div class="row"><b>${esc(r.s)}</b><span class="muted small">${esc(r.name)} · ${r.live ? 'running now' : `ended · saved ${ago(r.at / 1000)}`}</span><span class="spacer"></span>
+      <button type="button" class="btn sm ${r.live ? 'primary' : ''}" ${r.live ? `data-s="${esc(r.s)}" data-w="${r.w}"` : `data-log="${esc(r.log)}"`}>${r.live ? 'Open' : 'Read'}</button></div>
+    <pre class="lg-hits">${r.hits.map((h) => mark(h.line, lgQ)).join('\n')}</pre></section>`).join('') : `<p class="muted">Nothing printed “${esc(lgQ)}”.</p>`;
+}); });
+$('#lg-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.s) { dLg.close(); return openTerm(b.dataset.s, +b.dataset.w); }
+  if (b.dataset.back !== undefined) return $('#lg-form').requestSubmit();
+  if (!b.dataset.log) return;
+  let l; try { l = await api('/api/logs/' + encodeURIComponent(b.dataset.log)); } catch (err) { return toast(err.message, true); }
+  $('#lg-body').innerHTML = `<div class="row"><button type="button" class="btn sm ghost" data-back>${icon('left')}Results</button><b>${esc(l.meta.s)}</b><span class="muted small">${esc(l.meta.name)} · ${esc(home(l.meta.cwd))}</span></div>
+    <pre class="lg-log">${l.text.split('\n').map((x) => mark(x, lgQ)).join('\n')}</pre>`;
+  $('#lg-body mark')?.scrollIntoView({ block: 'center' });
+});
+
+// ---------- repos: worktrees, what changed in each, and who works there ----------
+const dRp = $('#dlg-repos');
+// the sessions with a pane inside a folder (the deepest worktree wins, so the main checkout doesn't claim them all)
+const sessionsIn = (dir, all) => S.sessions.filter((s) => s.windows.some((w) => w.panes.some((p) => {
+  const inside = (d) => p.cwd === d || p.cwd.startsWith(d + '/');
+  return inside(dir) && !all.some((d) => d !== dir && d.length > dir.length && inside(d));
+})));
+export async function openRepos() {
+  if (!dRp.open) dRp.showModal();
+  $('#rp-body').innerHTML = '<p class="muted">Reading repos…</p>';
+  let repos;
+  try { repos = await api('/api/repos', { timeout: 30000 }); } catch (e) { $('#rp-body').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  if (!repos.length) { $('#rp-body').innerHTML = '<p class="muted">No session is inside a git repo yet. Start one in a repo folder and it shows up here.</p>'; return; }
+  const all = repos.flatMap((r) => r.worktrees.map((w) => w.path));
+  $('#rp-body').innerHTML = repos.map((r) => `<section class="rp" data-root="${esc(r.root)}">
+    <div class="row"><h3>${esc(r.name)}</h3><span class="muted small mono">${esc(home(r.root))}</span><span class="spacer"></span>
+      <button type="button" class="btn sm" data-a="task">${icon('plus')}New task…</button></div>
+    <ul class="rp-wts">${r.worktrees.map((w) => { const ss = sessionsIn(w.path, all); return `<li data-path="${esc(w.path)}" data-s="${esc(ss[0]?.name || '')}">
+      <div class="rp-l"><b>⎇ ${esc(w.branch)}</b>${w.main ? ' <span class="muted small">main checkout</span>' : ''}
+        <span class="rp-m small">${[w.changed ? `<span class="attn">${w.changed} changed</span>` : '<span class="muted">clean</span>',
+          w.ahead ? `↑${w.ahead}` : '', w.behind ? `↓${w.behind}` : '', !w.upstream ? '<span class="muted">not pushed</span>' : ''].filter(Boolean).join(' · ')}</span>
+        ${w.last ? `<span class="muted small rp-c">${esc(w.last)} · ${ago(w.when)}</span>` : ''}
+        ${ss.length ? `<span class="small">${ss.map((s) => { const a = s.windows.flatMap((x) => x.panes).find((p) => p.running); return `${esc(s.name)}${a ? ` <span class="muted">(${esc(a.cmd)})</span>` : ''}`; }).join(', ')}</span>` : ''}</div>
+      <div class="rp-a">${ss.length ? '<button type="button" class="btn sm primary" data-a="open">Open</button>' : '<button type="button" class="btn sm" data-a="start">Start here</button>'}
+        <button type="button" class="btn sm ghost" data-a="changes">Changes</button></div></li>`; }).join('')}</ul></section>`).join('');
+}
+$('#rp-refresh').addEventListener('click', () => openRepos());
+$('#rp-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-a]'); if (!b) return;
+  const li = b.closest('li'), root = b.closest('[data-root]').dataset.root;
+  if (b.dataset.a === 'open') { dRp.close(); openTerm(li.dataset.s); }
+  else if (b.dataset.a === 'changes') openChanges(li.dataset.path);
+  else if (b.dataset.a === 'start') {
+    const r = await act('/api/sessions', { cwd: li.dataset.path }).catch(() => null); if (!r) return;
+    dRp.close(); await refresh(); openTerm(r.name);
+  } else if (b.dataset.a === 'task') {
+    const branch = await ask({ title: 'New task', message: 'A new branch in its own folder, with a session there. Then pick the agent to start.', label: 'Branch name', value: '', ok: 'Create',
+      validate: (v) => (/^(?!.*\.\.)(?!\/)(?!.*\/$)[\w./-]{1,100}$/.test(v) ? '' : 'Use letters, digits, dots, dashes and slashes.') });
+    if (!branch) return;
+    const r = await act('/api/sessions', { cwd: root, worktree: { branch } }).catch(() => null); if (!r) return;
+    dRp.close(); await refresh(); openTerm(r.name);
+    openAgent({ kind: 'claude', s: r.name, t: W(r.name, r.window), cwd: r.cwd, where: 'pane' });
+  }
+});
+
+// ---------- send one message to several sessions ----------
+// each session gets it in the pane running an agent, else its active pane
+const AGENTS = /^(claude|codex|aider|gemini|opencode|amp)$/;
+function bcTarget(s) {
+  for (const w of s.windows) { const p = w.panes.find((x) => AGENTS.test(x.cmd)); if (p) return { w: `${w.index}.${p.index}`, what: p.cmd, agent: true }; }
+  const w = activeWin(s), p = activePane(w);
+  return { w: `${w.index}.${p.index}`, what: p.running ? p.cmd : 'shell', agent: false };
+}
+const dBc = $('#dlg-bcast');
+export function openBroadcast() {
+  $('#bc-err').textContent = '';
+  $('#bc-list').innerHTML = S.sessions.map((s) => { const t = bcTarget(s); return `<li><label class="check"><input type="checkbox" value="${esc(s.name)}" data-w="${t.w}" data-agent="${t.agent}" ${t.agent ? 'checked' : ''}>
+    <span><b>${esc(s.name)}</b> <span class="muted small">${esc(t.what)}</span></span></label></li>`; }).join('') || '<li class="muted">No sessions.</li>';
+  dBc.showModal(); $('#bc-text').focus();
+}
+const bcPick = (f) => { for (const c of $$('#bc-list input')) c.checked = f(c); };
+$('#bc-agents').addEventListener('click', () => bcPick((c) => c.dataset.agent === 'true'));
+$('#bc-all').addEventListener('click', () => bcPick(() => true));
+$('#bc-none').addEventListener('click', () => bcPick(() => false));
+$('#bc-form').addEventListener('submit', (e) => { e.preventDefault(); busy($('#bc-go'), async () => {
+  const text = $('#bc-text').value.replace(/\s+$/, '');
+  const to = $$('#bc-list input:checked');
+  if (!text) { $('#bc-err').textContent = 'Write a message first.'; return; }
+  if (!to.length) { $('#bc-err').textContent = 'Pick at least one session.'; return; }
+  // multi-line text goes as a bracketed paste, so agents read it as one prompt
+  const body = text.includes('\n') ? `\x1b[200~${text}\x1b[201~` : text;
+  const failed = [];
+  await Promise.all(to.map(async (c) => {
+    const t = W(c.value, c.dataset.w);
+    try {
+      await api(`${t}/keys`, { method: 'POST', body: { text: body } });
+      if ($('#bc-enter').checked) { await new Promise((r) => setTimeout(r, 150)); await api(`${t}/keys`, { method: 'POST', body: { keys: ['Enter'] } }); }
+    } catch { failed.push(c.value); }
+  }));
+  if (failed.length) { $('#bc-err').textContent = `Couldn't reach ${failed.join(', ')}.`; return; }
+  dBc.close(); $('#bc-text').value = ''; toast(`Sent to ${to.length} session${to.length > 1 ? 's' : ''}`);
+}); });
+
+// ---------- watch links: view-only, one session, expire ----------
+const dShare = $('#dlg-share');
+let shareS = '';
+export function openShare(name) {
+  shareS = name; $('#share-s').textContent = name;
+  $('#share-out').hidden = true; $('#share-err').textContent = '';
+  dShare.showModal();
+}
+$('#share-h').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-h]'); if (!b) return;
+  for (const x of $$('#share-h [data-h]')) x.setAttribute('aria-checked', x === b);
+});
+$('#share-go').addEventListener('click', () => busy($('#share-go'), async () => {
+  $('#share-err').textContent = '';
+  try {
+    const d = await api('/api/share', { method: 'POST', body: { session: shareS, hours: +$('#share-h [aria-checked="true"]').dataset.h } });
+    const url = `${reachable()}/#watch=${d.token}`;
+    $('#share-url').value = url;
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    $('#share-qr').innerHTML = qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
+    $('#share-out').hidden = false;
+  } catch (e) { $('#share-err').textContent = e.message; }
+}));
+$('#share-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#share-url').value); toast('Link copied'); }
+  catch { $('#share-url').select(); toast('Select the link and copy it', true); }
+});
+
+// ---------- devices ----------
+async function renderDevices() {
+  try {
+    const { self, devices } = await api('/api/devices');
+    $('#dev-list').innerHTML = devices.sort((a, b) => (b.seen || b.created) - (a.seen || a.created)).map((d) => `<li>
+      <span class="dev-n"><b>${esc(d.name)}${d.id === self ? ' <span class="muted">(this device)</span>' : ''}</b>
+      <span class="muted small">${d.role === 'view' ? `watch only · ${esc(d.session)} · ends ${new Date(d.exp).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : d.seen ? `last used ${ago(d.seen / 1000)}` : 'not used yet'}</span></span>
+      <button type="button" class="btn sm ghost danger" data-rm="${d.id}" data-self="${d.id === self}">Remove</button></li>`).join('') || '<li class="muted empty-row">No devices yet.</li>';
+  } catch (e) { $('#dev-list').innerHTML = `<li class="muted empty-row">${esc(e.message)}</li>`; }
+}
+$('#dev-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-rm]'); if (!b) return;
+  const me = b.dataset.self === 'true';
+  if (!await ask({ title: 'Remove this device?', message: me ? 'This device is signed out and needs a new link to connect again.' : 'It is signed out at once.', ok: 'Remove', danger: true })) return;
+  try { await act(`/api/devices/${b.dataset.rm}`, undefined, 'DELETE'); } catch { return; }
+  if (me) { dSet.close(); return start(); }
+  renderDevices();
+});
+$('#dev-rotate').addEventListener('click', async () => {
+  if (!await ask({ title: 'Make a new server token?', message: 'Signed-in devices stay signed in. Links and QR codes made with the old token stop working; npm run pair shows the new one.', ok: 'New token', danger: true })) return;
+  try { await act('/api/token/rotate'); toast('New server token made'); } catch {}
 });
 
 // ---------- settings ----------
@@ -431,13 +599,14 @@ export async function openSettings(tab = 'alerts') {
   try {
     const st = alertCfg = await api('/api/config/settings');
     $('#al-url').value = st.ntfy; $('#al-prompts').checked = st.alerts.prompts; $('#al-quiet').checked = st.alerts.quiet;
-    $('#al-finished').checked = st.alerts.finished; $('#al-secs').value = st.alerts.quietSeconds; $('#al-agents').value = st.agents.join(', ');
+    $('#al-finished').checked = st.alerts.finished; $('#al-machine').checked = st.alerts.machine !== false; $('#al-secs').value = st.alerts.quietSeconds; $('#al-agents').value = st.agents.join(', ');
     $('#al-sub').hidden = !st.ntfy; $('#al-sub').href = st.ntfy.replace(/^http:/, 'https:');
   } catch (e) { $('#set-err').textContent = e.message; }
 }
 function setTab(t) {
   for (const b of $$('#set-tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === t);
   for (const p of $$('#settings-form [data-pane]')) p.hidden = p.dataset.pane !== t;
+  if (t === 'devices') renderDevices();
 }
 // snippets editor: one row per command, a name is optional
 const snipRow = (s) => `<li><input class="sn-l" value="${esc(s.label || '')}" placeholder="Name (optional)" aria-label="Snippet name" maxlength="60">
@@ -465,7 +634,7 @@ const isLocal = (b) => /^https?:\/\/(localhost|127\.|\[::1\])/.test(b);
 async function saveAlerts() {
   const url = $('#al-url').value.trim();
   const base = isLocal(cfg().base) ? alertCfg.base : cfg().base; // localhost means nothing to a phone
-  const body = { ...(base ? { base } : {}), ntfy: url, alerts: { prompts: $('#al-prompts').checked, quiet: $('#al-quiet').checked, finished: $('#al-finished').checked,
+  const body = { ...(base ? { base } : {}), ntfy: url, alerts: { prompts: $('#al-prompts').checked, quiet: $('#al-quiet').checked, finished: $('#al-finished').checked, machine: $('#al-machine').checked,
     quietSeconds: Math.max(5, +$('#al-secs').value || 20) }, agents: $('#al-agents').value.split(/[,\s]+/).filter(Boolean) };
   await act('/api/config/settings', body, 'PUT');
   $('#al-sub').hidden = !url; $('#al-sub').href = url.replace(/^http:/, 'https:');

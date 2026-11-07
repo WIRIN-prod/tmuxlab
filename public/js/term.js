@@ -564,7 +564,15 @@ const paste = (t) => sendInput(t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t);
 // snippets: saved ones (Settings > Snippets), then recent message-box sends; typed and run in the focused pane
 function snippets(anchor) {
   const cut = (c) => (c.length > 48 ? c.slice(0, 46) + '…' : c);
-  const run = (c) => () => { paste(c); setTimeout(() => sendInput('\r'), 30); };
+  const run = (c) => async () => {
+    // {{name}} asks for a value each time; a value never contains a newline, so it can't run a second command
+    for (const name of new Set([...c.matchAll(/\{\{\s*([^{}]{1,40}?)\s*\}\}/g)].map((m) => m[1]))) {
+      const v = await ask({ title: 'Fill in the snippet', message: c, label: name, ok: 'Run', validate: (x) => (x ? '' : `Enter ${name}.`) });
+      if (v === null) return;
+      c = c.replace(new RegExp(`\\{\\{\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`, 'g'), () => v.replace(/[\r\n]+/g, ' '));
+    }
+    paste(c); setTimeout(() => sendInput('\r'), 30);
+  };
   const saved = S.snippets.map((s) => ({ label: s.label || cut(s.cmd), sub: s.label ? cut(s.cmd) : '', icon: 'snippet', run: run(s.cmd) }));
   const recent = store.get('sent', []).filter((c) => !S.snippets.some((s) => s.cmd === c)).slice(0, 8)
     .map((c) => ({ label: cut(c), icon: 'refresh', run: run(c) }));

@@ -1,15 +1,22 @@
 // Boot: connect to the current machine, then poll.
-import { $, esc, S, api, cfg, saveMachines, show, isApp, Unauthorized, busy } from './core.js';
+import { $, esc, S, api, act, toast, cfg, saveMachines, show, isApp, Unauthorized, busy } from './core.js';
 import { refresh, refreshPreviews, refreshStats } from './wall.js';
-import { closeTerm } from './term.js';
+import { closeTerm, openTerm } from './term.js';
 import './sheets.js';
 
+// a watch link (#watch=...) opens one session view-only; it is never saved over this browser's own sign-in
+(() => {
+  const m = location.hash.match(/watch=([\w-]+)/);
+  if (!m) return;
+  S.watch = true; S.machines = [{ name: '', base: location.origin, token: m[1] }]; S.cur = 0;
+  history.replaceState(null, '', location.pathname);
+})();
 // a link like http://host:7681/#token=... signs this browser in to that machine
 (() => {
   const m = location.hash.match(/token=([\w-]+)/);
-  if (!m || isApp) return;
+  if (!m || isApp || S.watch) return;
   const i = S.machines.findIndex((x) => x.base === location.origin);
-  if (i >= 0) { S.machines[i].token = m[1]; S.cur = i; } else { S.machines.push({ name: '', base: location.origin, token: m[1] }); S.cur = S.machines.length - 1; }
+  if (i >= 0) { S.machines[i].token = m[1]; S.machines[i].named = false; S.cur = i; } else { S.machines.push({ name: '', base: location.origin, token: m[1] }); S.cur = S.machines.length - 1; }
   saveMachines();
   history.replaceState(null, '', location.pathname);
 })();
@@ -71,7 +78,7 @@ async function connect() {
     const info = await api('/api/info', { m: mach, timeout: 6000 });
     mach.name = info.host;
     const i = S.machines.findIndex((x) => x.base === base);
-    if (i >= 0) S.machines[i] = { ...S.machines[i], token }; else S.machines.push(mach);
+    if (i >= 0) S.machines[i] = { ...S.machines[i], token, named: false }; else S.machines.push(mach);
     S.cur = i >= 0 ? i : S.machines.length - 1;
     saveMachines();
     $('#login-token').value = '';
@@ -80,6 +87,42 @@ async function connect() {
     $('#login-err').textContent = err instanceof Unauthorized ? err.message : `Could not reach ${base}. Check the server is running and this device can reach it.`;
   }
 }
+
+// the server token only signs a device in: swap it for this device's own revocable token
+const devName = () => {
+  if (isApp) return 'Android app';
+  const u = navigator.userAgent;
+  const b = /Edg\//.test(u) ? 'Edge' : /Firefox\//.test(u) ? 'Firefox' : /Chrome\//.test(u) ? 'Chrome' : /Safari\//.test(u) ? 'Safari' : 'Browser';
+  const o = /Android/.test(u) ? 'Android' : /iPhone|iPad/.test(u) ? 'iOS' : /Mac/.test(u) ? 'Mac' : /Windows/.test(u) ? 'Windows' : /Linux/.test(u) ? 'Linux' : '';
+  return o ? `${b} on ${o}` : b;
+};
+async function adoptDevice(info) {
+  const m = cfg();
+  if (info.auth === 'server') {
+    const d = await api('/api/devices', { method: 'POST', body: { name: devName() } }).catch(() => null); // older servers: keep the server token
+    if (d?.token) { m.token = d.token; m.named = true; saveMachines(); }
+  } else if (info.auth === 'device' && info.role === 'full' && !m.named) {
+    await api('/api/devices/self/name', { method: 'POST', body: { name: devName() } }).catch(() => {});
+    m.named = true; saveMachines();
+  }
+}
+
+// after a reboot: the sessions that were open before, one tap away
+async function offerRestore() {
+  const o = await api('/api/restore').catch(() => null); // older servers: nothing to offer
+  $('#restore').hidden = !o?.sessions?.length;
+  if (!o?.sessions?.length) return;
+  const n = o.sessions.length;
+  $('#rs-title').textContent = `${n} session${n > 1 ? 's were' : ' was'} open before this machine restarted`;
+  $('#rs-list').textContent = o.sessions.map((s) => s.name).join(', ');
+  $('#rs-run').closest('label').hidden = !o.sessions.some((s) => s.run.length);
+  $('#rs-run').closest('label').title = o.sessions.flatMap((s) => s.run).join('\n');
+}
+$('#rs-go').addEventListener('click', () => busy($('#rs-go'), async () => {
+  const r = await act('/api/restore', { run: $('#rs-run').checked });
+  $('#restore').hidden = true; toast(`Restored ${r.restored.length} session${r.restored.length === 1 ? '' : 's'}`); refresh();
+}));
+$('#rs-no').addEventListener('click', async () => { $('#restore').hidden = true; await act('/api/restore', undefined, 'DELETE').catch(() => {}); });
 
 let pollers = [];
 const stop = () => { pollers.forEach(clearInterval); pollers = []; };
@@ -90,14 +133,23 @@ export async function start() {
   S.sessions = []; S.previews = {}; S.stats = null;
   $('#grid').replaceChildren();
   try {
-    const [info, presets, stacks, projects, snippets] = await Promise.all([api('/api/info'), api('/api/config/presets'), api('/api/config/stacks'),
-      api('/api/config/projects').catch(() => []), api('/api/config/snippets').catch(() => [])]); // older servers lack projects/snippets
+    const info = await api('/api/info');
+    const get = (p) => info.role === 'view' ? [] : api(p).catch(() => []); // watch links can't read config; older servers lack projects/snippets
+    const [presets, stacks, projects, snippets] = await Promise.all(['/api/config/presets', '/api/config/stacks', '/api/config/projects', '/api/config/snippets'].map(get));
     Object.assign(S, { info, presets, stacks, projects, snippets });
+    await adoptDevice(info);
     document.title = `tmuxlab · ${cfg().name || info.host}`;
   } catch (e) {
     return showLogin(e instanceof Unauthorized ? e.message : `Could not reach ${cfg().base}. Check the server is running.`, S.machines.length > 1);
   }
+  if (S.info.role === 'view') { // watch link: just that session, nothing to change
+    document.body.classList.add('viewer');
+    await refresh(); openTerm(S.info.session);
+    pollers = [setInterval(() => !document.hidden && refresh(), 3000)];
+    return;
+  }
   show('wall');
+  offerRestore();
   await refresh();
   refreshPreviews(); refreshStats();
   pollers = [setInterval(() => !document.hidden && refresh(), 2000), setInterval(refreshPreviews, 3000), setInterval(refreshStats, 3000)];

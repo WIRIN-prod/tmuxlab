@@ -1,7 +1,7 @@
 // The session wall: live previews, status, approvals, machine stats.
 import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy, whereHtml, whereText, presetIcon, onBack, openPort } from './core.js';
 import { openTerm, renderTermBar } from './term.js';
-import { openNew, openChanges, openPalette, openSettings, openSchedules, openAgent } from './sheets.js';
+import { openNew, openChanges, openPalette, openSettings, openSchedules, openAgent, openShare, openBroadcast, openRepos, openLogs } from './sheets.js';
 import { start, addMachine } from './main.js';
 
 const seenPrompts = new Set();
@@ -209,6 +209,7 @@ $('#grid').addEventListener('click', async (e) => {
       await act(`/api/sessions/${encodeURIComponent(s.name)}/windows`, { preset: p.id }); toast(`Opened ${p.label}`); refresh();
     })) },
     ...(aw.branch ? [{ label: 'Changes', icon: 'diff', run: () => openChanges(activePane(aw).cwd) }] : []),
+    { label: 'Share a watch link…', icon: 'globe', run: () => openShare(s.name) },
     { label: 'Move to project', icon: 'folder', run: () => menu(e.target.closest('button'), moveItems([s.name], projectOf(s))) },
     { label: 'Rename', icon: 'edit', run: async () => {
       const to = await ask({ title: 'Rename session', label: 'Name', value: s.name, ok: 'Rename', validate: NAME_RULE });
@@ -364,6 +365,9 @@ $('#empty [data-new]').addEventListener('click', () => openNew());
 $('#btn-palette').addEventListener('click', () => openPalette());
 $('#btn-settings').addEventListener('click', () => openSettings());
 $('#btn-sched').addEventListener('click', () => openSchedules());
+$('#btn-bcast').addEventListener('click', () => openBroadcast());
+$('#btn-repos').addEventListener('click', () => openRepos());
+$('#btn-logs').addEventListener('click', () => openLogs());
 
 // machine switcher: shows how busy each saved machine is
 $('#machine').addEventListener('click', async (e) => {

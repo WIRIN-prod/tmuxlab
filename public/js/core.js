@@ -17,7 +17,7 @@ export const S = {
 if (!S.machines) { const old = store.get('cfg', null); S.machines = old ? [{ name: '', ...old }] : []; }
 if (S.cur >= S.machines.length) S.cur = 0;
 export const cfg = () => S.machines[S.cur];
-export const saveMachines = () => { store.set('machines', S.machines); store.set('cur', S.cur); };
+export const saveMachines = () => { if (S.watch) return; store.set('machines', S.machines); store.set('cur', S.cur); }; // a watch link is never remembered
 
 export class Unauthorized extends Error {}
 export async function api(path, { method = 'GET', body, raw, m = cfg(), timeout = 15000 } = {}) {

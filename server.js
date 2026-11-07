@@ -13,6 +13,10 @@ import { claudeHistory, codexHistory } from './lib/agents.js';
 import * as G from './lib/git.js';
 import { stats, openPorts } from './lib/stats.js';
 import { forward } from './lib/ports.js';
+import * as auth from './lib/auth.js';
+import * as rs from './lib/restore.js';
+import * as logs from './lib/logs.js';
+const { setMaster } = auth;
 import { parseCron, nextRun } from './lib/cron.js';
 import { startWatcher, prompts, status, lastRuns, notify, answerToken } from './lib/watch.js';
 
@@ -22,10 +26,10 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 // --- auth: one shared secret, generated on first run ---
 const tokenFile = path.join(CONF, 'token');
-const TOKEN = process.env.TMUXLAB_TOKEN || (fs.existsSync(tokenFile)
+let TOKEN = process.env.TMUXLAB_TOKEN || (fs.existsSync(tokenFile)
   ? fs.readFileSync(tokenFile, 'utf8').trim()
   : (() => { const t = crypto.randomBytes(24).toString('base64url'); fs.writeFileSync(tokenFile, t, { mode: 0o600 }); return t; })());
-const authed = (t) => typeof t === 'string' && t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
+setMaster(TOKEN);
 
 // addresses other devices can use; Tailscale (100.64/10) first since it also works away from home
 const lanAddrs = () => ['127.0.0.1', 'localhost'].includes(HOST) ? [] : Object.entries(os.networkInterfaces())
@@ -106,7 +110,14 @@ const r = (s) => new RegExp(`^${s}$`);
 const routes = [
   ['GET', r('/api/sessions'), () => listSessions()],
   ['POST', r('/api/sessions'), (_, b) => createSession(b)],
-  ['DELETE', r('/api/sessions/([^/]+)'), async ([s]) => { await killViews(sess(s)); await tmux('kill-session', '-t', `=${s}`); return {}; }],
+  // after a reboot: offer to recreate the sessions that were open before
+  ['GET', r('/api/restore'), () => rs.offer()],
+  // output of every pane, live and saved
+  ['GET', r('/api/logs/search'), (_, __, q) => logs.search(q.get('q'))],
+  ['GET', r('/api/logs/([\\w.-]+)'), ([f]) => { const l = logs.readLog(f); if (!l) throw httpErr(404, 'no such log'); return l; }],
+  ['POST', r('/api/restore'), (_, b) => rs.restore({ run: b.run !== false })],
+  ['DELETE', r('/api/restore'), () => { rs.dismiss(); return {}; }],
+  ['DELETE', r('/api/sessions/([^/]+)'), async ([s]) => { await logs.saveLogs(sess(s)).catch(() => {}); await killViews(s); await tmux('kill-session', '-t', `=${s}`); return {}; }],
   ['POST', r('/api/sessions/([^/]+)/rename'), async ([s], b) => {
     if (!NAME_RE.test(b.to || '')) throw httpErr(400, 'bad name');
     await tmux('rename-session', '-t', `=${sess(s)}`, b.to); return {};
@@ -218,6 +229,7 @@ const routes = [
     await runSchedule(s); return {};
   }],
   ['GET', r('/api/git'), (_, __, q) => G.info(q.get('path'))],
+  ['GET', r('/api/repos'), async () => G.overview((await listPanes()).filter((p) => !VIEW_RE.test(p.session_name)).map((p) => p.pane_current_path))],
   ['GET', r('/api/git/diff'), async (_, __, q) => ({ diff: await G.diff(q.get('path'), q.get('file')) })],
   ['POST', r('/api/git/commit'), async (_, b) => ({ result: await G.commit(b.path, b.message) })],
   ['POST', r('/api/git/push'), async (_, b) => ({ result: await G.push(b.path) })],
@@ -231,7 +243,25 @@ const routes = [
       .map((d) => d.name).sort((a, b) => a.localeCompare(b)).slice(0, 500);
     return { path: dir, parent: path.dirname(dir), dirs, git: fs.existsSync(path.join(dir, '.git')), home: os.homedir() };
   }],
-  ['GET', r('/api/info'), async () => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2, addrs: lanAddrs() })],
+  ['GET', r('/api/info'), async (_, __, ___, who) => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2,
+    addrs: lanAddrs(), role: who.role, session: who.session, self: who.id, auth: who.master ? 'server' : 'device' })],
+  // devices: each gets its own token (the server token only signs devices in); share links are view-only devices
+  ['GET', r('/api/devices'), (_, __, ___, who) => ({ self: who.id, devices: auth.list() })],
+  ['POST', r('/api/devices'), (_, b) => auth.issue({ name: b.name })],
+  ['POST', r('/api/devices/self/name'), (_, b, __, who) => { if (!who.master) auth.rename(who.id, b.name || 'Device'); return {}; }],
+  ['DELETE', r('/api/devices/([0-9a-f]{12})'), ([id]) => { if (!auth.revoke(id)) throw httpErr(404, 'no such device'); return {}; }],
+  ['POST', r('/api/share'), async (_, b) => {
+    const hours = b.hours | 0;
+    if (!NAME_RE.test(b.session || '') || !(await listSessions()).some((s) => s.name === b.session)) throw httpErr(404, 'no such session');
+    if (hours < 1 || hours > 168) throw httpErr(400, 'a link lasts 1 to 168 hours');
+    return auth.issue({ name: `View link: ${b.session}`, role: 'view', session: b.session, hours });
+  }],
+  ['POST', r('/api/token/rotate'), () => {
+    if (process.env.TMUXLAB_TOKEN) throw httpErr(400, 'the server token is set by TMUXLAB_TOKEN; change it there');
+    TOKEN = crypto.randomBytes(24).toString('base64url');
+    fs.writeFileSync(tokenFile, TOKEN, { mode: 0o600 }); setMaster(TOKEN);
+    return {};
+  }],
 ];
 
 // upload into <folder>/.tmuxlab-uploads (git-ignored locally) so agents can read it without leaving the project
@@ -296,14 +326,19 @@ const server = http.createServer(async (req, res) => {
     if (!a) return send(res, 410, { error: 'this answer link was used or has expired' });
     try { await choose(a.pane, a.n, a.question); return send(res, 200, { ok: true }); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
   }
-  if (!authed((req.headers.authorization || '').replace(/^Bearer /, ''))) return send(res, 401, { error: 'unauthorized' });
+  const who = auth.check((req.headers.authorization || '').replace(/^Bearer /, ''));
+  if (!who) return send(res, 401, { error: 'unauthorized' });
+  // a view-only link can read its one session and nothing else
+  const viewer = who.role === 'view';
+  if (viewer && !(req.method === 'GET' && ['/api/info', '/api/sessions'].includes(url.pathname))) return send(res, 403, { error: 'this link can only watch' });
   try {
     if (req.method === 'POST' && url.pathname === '/api/upload') return send(res, 200, await upload(req, url.searchParams));
     for (const [m, re, fn] of routes) {
       const hit = req.method === m && url.pathname.match(re);
       if (!hit) continue;
       const body = m === 'GET' ? {} : await readBody(req);
-      return send(res, 200, await fn(hit.slice(1).map(decodeURIComponent), body, url.searchParams));
+      const out = await fn(hit.slice(1).map(decodeURIComponent), body, url.searchParams, who);
+      return send(res, 200, viewer && url.pathname === '/api/sessions' ? out.filter((s) => s.name === who.session) : out);
     }
     send(res, 404, { error: 'no route' });
   } catch (e) {
@@ -316,13 +351,14 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
 server.on('upgrade', (req, sock, head) => {
   const url = new URL(req.url, 'http://x');
   const s = url.searchParams.get('s') || '';
-  if (url.pathname !== '/ws' || !authed(url.searchParams.get('token')) || !NAME_RE.test(s)) {
+  const who = auth.check(url.searchParams.get('token'));
+  if (url.pathname !== '/ws' || !who || !NAME_RE.test(s) || (who.role === 'view' && s !== who.session)) {
     sock.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return;
   }
-  wss.handleUpgrade(req, sock, head, (ws) => attach(ws, s, url.searchParams).catch((e) => { console.error('attach:', e.message); ws.close(1011); }));
+  wss.handleUpgrade(req, sock, head, (ws) => attach(ws, s, url.searchParams, who.role === 'view').catch((e) => { console.error('attach:', e.message); ws.close(1011); }));
 });
 
-async function attach(ws, s, q) {
+async function attach(ws, s, q, readOnly = false) {
   const cols = Math.max(10, Math.min(+q.get('cols') || 80, 500));
   const rows = Math.max(5, Math.min(+q.get('rows') || 24, 300));
   const w = q.get('w');
@@ -345,7 +381,7 @@ async function attach(ws, s, q) {
   ws.send('\x00TL' + JSON.stringify({ t: 'view', name: view }));
   const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', LANG: process.env.LANG || 'C.UTF-8' };
   delete env.TMUX; // allow attaching even when the server itself runs inside tmux
-  const p = pty.spawn(TMUX, [...SOCK, 'attach-session', '-t', `=${view}`], { name: 'xterm-256color', cols, rows, cwd: os.homedir(), env });
+  const p = pty.spawn(TMUX, [...SOCK, 'attach-session', ...(readOnly ? ['-f', 'read-only,ignore-size'] : []), '-t', `=${view}`], { name: 'xterm-256color', cols, rows, cwd: os.homedir(), env });
   p.onData((d) => ws.readyState === 1 && ws.send(d));
   p.onExit(({ exitCode }) => { cleanup(); if (ws.readyState === 1) ws.close(4000 + Math.min(exitCode, 999), 'detached'); });
   const handle = (m) => {
@@ -356,7 +392,7 @@ async function attach(ws, s, q) {
         const c = JSON.parse(msg.slice(1));
         if (c.t === 'resize') p.resize(Math.max(10, Math.min(c.cols | 0, 500)), Math.max(5, Math.min(c.rows | 0, 300)));
       } catch {}
-    } else p.write(msg);
+    } else if (!readOnly) p.write(msg);
   };
   ws.off('message', onEarly);
   ws.on('message', handle);
@@ -366,6 +402,9 @@ async function attach(ws, s, q) {
 }
 
 startWatcher(runSchedule);
+setInterval(() => rs.snapshot().catch((e) => console.error('snapshot:', e.message)), 30e3).unref();
+setTimeout(() => rs.snapshot().catch(() => {}), 3000).unref();
+setInterval(() => logs.saveLogs().catch((e) => console.error('logs:', e.message)), 60e3).unref();
 server.listen(PORT, HOST, () => {
   // skip docker/bridge interfaces; a loopback bind is only reachable from localhost
   const lan = lanAddrs();
