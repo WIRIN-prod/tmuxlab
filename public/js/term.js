@@ -1,7 +1,7 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
 import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, onBack, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
-import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent } from './sheets.js';
+import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent, openPalette } from './sheets.js';
 
 export const THEMES = {
   ink: { background: '#070D18', foreground: '#E2E9F6', cursor: '#5B9BFF', cursorAccent: '#070D18', selectionBackground: '#5B9BFF55',
@@ -31,7 +31,7 @@ class Pane {
     this.s = s; this.w0 = w; this.view = null; this.ws = null; this.retry = 0; this.timer = null;
     this.el = document.createElement('div');
     this.el.className = 'tpane';
-    this.el.innerHTML = `<div class="tph"><span class="tpn"></span><button class="btn sm ghost icon" data-x aria-label="Close this view">✕</button></div>
+    this.el.innerHTML = `<div class="tph"><span class="tps"></span><button class="tpn" aria-haspopup="menu" title="Change what this view shows, move or close it"></button><button class="btn sm ghost icon" data-x aria-label="Close this view">✕</button></div>
       <div class="tbody"><div class="xt"></div>
       <div class="banner" hidden><span>Reconnecting…</span><button class="btn sm">Retry now</button></div>
       <div class="scrollhint" hidden>History · scroll down to return<button class="btn sm">Exit</button></div></div>`;
@@ -50,6 +50,8 @@ class Pane {
     });
     this.el.addEventListener('pointerdown', () => setFocus(T.panes.indexOf(this)), true);
     $('[data-x]', this.el).onclick = (e) => { e.stopPropagation(); closePane(this); };
+    $('.tpn', this.el).onclick = (e) => slotMenu(this, e.currentTarget);
+    $('.tph', this.el).ondblclick = (e) => { if (!e.target.closest('button')) toggleZoom(); };
     $('.banner .btn', this.el).onclick = () => { this.retry = 0; this.connect(); };
     $('.scrollhint .btn', this.el).onclick = async () => { await act(`${W(this.s, this.win.index)}/scroll`, { dir: 'cancel' }); refresh(); };
     touchScroll(this);
@@ -107,6 +109,7 @@ class Pane {
   dispose() {
     clearTimeout(this.timer);
     if (this.ws) { this.ws.onclose = null; this.ws.close(); }
+    const hd = $('#t-head', this.el); if (hd) { $('#t-ask').hidden = true; $('#term .tmain').before(hd); }
     this.term.dispose(); this.el.remove();
   }
 }
@@ -120,15 +123,53 @@ function renderConn() {
   l.className = st === 'ok' ? 'sr-only' : '';
 }
 
+const layoutKey = () => `layout:${cfg()?.base}`;
 function layout() {
   const g = $('#terms');
-  g.dataset.n = T.panes.length;
+  if (T.panes.length < 2) T.zoom = false;
+  g.dataset.n = T.zoom ? 1 : T.panes.length;
+  g.dataset.arr = T.arr || 'main';
+  g.classList.toggle('zoom', !!T.zoom);
+  // remembered, so leaving the terminal and coming back (or reloading) brings the same views back
+  if (T.panes.length && !$('#term').hidden) store.set(layoutKey(), { slots: T.panes.map((p) => [p.s, p.win?.index ?? p.w0 ?? null]), arr: T.arr || 'main' });
   for (const [i, p] of T.panes.entries()) {
     p.el.classList.toggle('focus', i === T.focus && T.panes.length > 1);
     $('.tph', p.el).hidden = T.panes.length < 2;
   }
   requestAnimationFrame(() => T.panes.forEach((p) => { try { p.fit.fit(); } catch {} }));
-  $('#btn-split').hidden = touch && innerWidth < 768 || T.panes.length >= MAX_PANES;
+  $('#btn-split').setAttribute('aria-label', T.panes.length > 1 ? `Layout: ${T.panes.length} views` : 'Layout');
+}
+const canSplit = () => !(touch && innerWidth < 768);
+$('#t-where').addEventListener('click', (e) => { if (T.panes.length > 1) slotMenu(focused(), e.currentTarget); else if (narrow()) openPalette(); });
+const narrow = () => innerWidth < 700;
+function toggleZoom() { T.zoom = !T.zoom && T.panes.length > 1; layout(); }
+// what a view shows can be changed, moved or closed from its own header
+function slotMenu(p, anchor) {
+  const i = T.panes.indexOf(p);
+  setFocus(i);
+  menu(anchor, [
+    { label: 'Show something else here…', icon: 'terminal', run: () => pickWindow('Show in this view', (s, w) => showIn(i, s, w), shownNote) },
+    { label: 'Move left', icon: 'left', disabled: i === 0, run: () => moveSlot(i, -1) },
+    { label: 'Move right', icon: 'right', disabled: i === T.panes.length - 1, run: () => moveSlot(i, 1) },
+    { label: T.zoom ? 'Show all views' : 'Zoom this view', icon: 'columns', run: toggleZoom },
+    '-',
+    { label: 'Close this view', icon: 'x', run: () => closePane(p) },
+  ]);
+}
+function swapSlots(i, j) {
+  const ps = T.panes; if (i === j || !ps[i] || !ps[j]) return;
+  [ps[i], ps[j]] = [ps[j], ps[i]];
+  for (const p of ps) $('#terms').appendChild(p.el); // DOM order = slot order
+  T.focus = j; layout(); renderTermBar();
+}
+const moveSlot = (i, d) => swapSlots(i, i + d);
+const shownNote = (s, w) => { const i = T.panes.findIndex((p) => p.s === s && p.win?.index === w); return i < 0 ? '' : T.panes.length > 1 ? `showing in view ${i + 1}` : 'showing now'; };
+// put a window in view i; if it already shows in another view, the two swap
+function showIn(i, s, w) {
+  const j = T.panes.findIndex((p) => p.s === s && (w == null || p.win?.index === w));
+  if (j === i) return setFocus(i);
+  if (j >= 0) { swapSlots(j, i); return; }
+  T.focus = i; replaceFocused(s, w);
 }
 
 function setFocus(i) {
@@ -142,9 +183,15 @@ export function openTerm(name, w) {
   if (!$('#term').hidden && T.panes.length) return switchTo(name, w);
   afterNav(() => history.pushState({ term: name }, ''));
   for (const p of T.panes) p.dispose();
-  T.panes = []; T.focus = 0;
+  T.panes = []; T.focus = 0; T.zoom = false;
   $('#wall').hidden = true; $('#term').hidden = false;
-  addPane(name, w);
+  const saved = store.get(layoutKey(), null);
+  const slots = (saved?.slots || []).filter(([s]) => findSess(s)).slice(0, MAX_PANES);
+  T.arr = saved?.arr || 'main';
+  if (slots.length > 1 && canSplit() && slots.some(([s]) => s === name)) {
+    for (const [s, wi] of slots) addPane(s, s === name && w != null ? w : wi ?? undefined);
+    setFocus(slots.findIndex(([s]) => s === name));
+  } else addPane(name, w);
   keepAwake(true);
 }
 
@@ -154,14 +201,20 @@ const openTabs = () => store.get(tabsKey(), []);
 const saveTabs = (l) => { store.set(tabsKey(), l); renderSessTabs(); };
 function addTab(name) { const l = openTabs(); if (!l.includes(name)) saveTabs([...l, name].slice(-12)); }
 // the focused view shows another session; the others in a split stay as they are
-function switchTo(name, w) {
+function switchTo(name, w, push = false) {
   const old = focused();
   if (!old) return addPane(name, w);
-  if (old.s === name && w == null) return;
+  const j = T.panes.findIndex((p) => p.s === name && (w == null || p.win?.index === w));
+  if (j >= 0) { if (j !== T.focus) setFocus(j); if (T.zoom) layout(); return; }
+  if (push) history.pushState({ term: name, w }, ''); else history.replaceState({ term: name, w }, '');
+  replaceFocused(name, w);
+}
+function replaceFocused(name, w) {
+  const old = focused();
+  addTab(name);
   const p = new Pane(name, w);
   p.mount($('#terms'), old.el);
   old.dispose(); T.panes[T.focus] = p;
-  history.replaceState({ term: name }, '');
   $('#t-tabs').dataset.sig = '';
   layout(); renderTermBar(); renderSessTabs();
   requestAnimationFrame(() => { p.fit.fit(); p.connect(); if (!touch) p.term.focus(); });
@@ -180,10 +233,10 @@ function renderSessTabs() {
   if (S.sessions.length && l.some((n) => !findSess(n) && n !== cur)) { l = l.filter((n) => findSess(n) || n === cur); store.set(tabsKey(), l); }
   if (cur && !l.includes(cur)) l = [...l, cur];
   const html = l.map((n) => {
-    const s = findSess(n), on = n === cur;
+    const s = findSess(n), on = n === cur, shown = !on && T.panes.some((p) => p.s === n);
     const unread = !on && s && s.activity > (lastSeen[`s:${n}`] || 0) && lastSeen[`s:${n}`] !== undefined;
-    return `<div class="stab ${on ? 'on' : ''} ${unread ? 'unread' : ''}"><button class="stab-b" data-s="${esc(n)}" aria-current="${on}" ${on ? 'title="Long-press or right-click for more"' : ''}>
-      <span class="dot ${s ? sessState(s) : 'dead'}"></span><span class="n">${esc(n)}</span></button>${on ? `<button class="stab-x" data-x="${esc(n)}" aria-label="Close tab ${esc(n)}">${icon('x')}</button>` : ''}</div>`;
+    return `<div class="stab ${on ? 'on' : ''} ${shown ? 'shown' : ''} ${unread ? 'unread' : ''}"><button class="stab-b" draggable="${!touch}" data-s="${esc(n)}" aria-current="${on}" ${on ? `title="${narrow() ? 'Tap for every session' : 'Long-press or right-click for more'}"` : ''}>
+      <span class="dot ${s ? sessState(s) : 'dead'}"></span><span class="n">${esc(n)}</span>${on && narrow() ? '<span class="chev" aria-hidden="true">▾</span>' : ''}</button>${on ? `<button class="stab-x" data-x="${esc(n)}" aria-label="Close tab ${esc(n)}">${icon('x')}</button>` : ''}</div>`;
   }).join('');
   if ($('#t-stabs').dataset.sig === html) return;
   $('#t-stabs').dataset.sig = html; $('#t-stabs').innerHTML = html;
@@ -191,7 +244,9 @@ function renderSessTabs() {
 }
 $('#t-stabs').addEventListener('click', (e) => {
   const x = e.target.closest('[data-x]'); if (x) return closeTab(x.dataset.x);
-  const b = e.target.closest('[data-s]'); if (b) switchTo(b.dataset.s);
+  const b = e.target.closest('[data-s]'); if (!b) return;
+  if (b.dataset.s === focused()?.s && narrow()) return openPalette();
+  switchTo(b.dataset.s);
 });
 $('#t-stabs').addEventListener('dblclick', (e) => { if (e.target.closest('.stab.on')) renameSession(); });
 $('#t-stabs').addEventListener('contextmenu', (e) => {
@@ -208,8 +263,10 @@ $('#t-stabs').addEventListener('contextmenu', (e) => {
 $('#btn-opensess').addEventListener('click', (e) => {
   const l = openTabs();
   const rest = S.sessions.filter((s) => !l.includes(s.name));
-  menu(e.currentTarget, [...rest.map((s) => ({ label: s.name, sub: whereText(activeWin(s)), icon: s.windows.some((w) => w.prompt) ? 'spark' : 'terminal', run: () => openTerm(s.name) })),
-    ...(rest.length ? ['-'] : []), { label: 'New session…', icon: 'plus', run: () => openNew() }]);
+  const anchor = e.currentTarget;
+  menu(anchor, [...rest.map((s) => ({ label: s.name, sub: whereText(activeWin(s)), icon: s.windows.some((w) => w.prompt) ? 'spark' : 'terminal', run: () => openTerm(s.name) })),
+    ...(rest.length ? ['-'] : []), { label: `New window in ${focused()?.s}…`, icon: 'plus', disabled: !focused(), run: () => setTimeout(() => newWindowMenu(anchor), 0) },
+    { label: 'New session…', icon: 'plus', run: () => openNew() }]);
 });
 // Alt+1..9 jumps to a tab; Alt+[ / Alt+] steps through them
 addEventListener('keydown', (e) => {
@@ -221,6 +278,7 @@ addEventListener('keydown', (e) => {
 
 export function addPane(name, w) {
   if (T.panes.length >= MAX_PANES) return toast(`Up to ${MAX_PANES} views side by side`, true);
+  addTab(name); T.zoom = false;
   const p = new Pane(name, w);
   T.panes.push(p);
   p.mount($('#terms'));
@@ -245,8 +303,21 @@ export function closeTerm() {
   refresh().then(refreshPreviews);
 }
 $('#btn-back').addEventListener('click', () => history.state?.term ? history.back() : closeTerm());
-addEventListener('popstate', () => { if (!$('#term').hidden) closeTerm(); });
-$('#btn-split').addEventListener('click', () => pickWindow('Show next to this', (s, w) => addPane(s, w)));
+addEventListener('popstate', () => { if ($('#term').hidden) return; const st = history.state; if (st?.term && T.panes.length) switchTo(st.term, st.w ?? undefined); else closeTerm(); });
+$('#btn-split').addEventListener('click', (e) => {
+  const n = T.panes.length;
+  menu(e.currentTarget, [
+    { label: 'Add a view beside…', icon: 'columns', disabled: n >= MAX_PANES || !canSplit(), sub: canSplit() ? `up to ${MAX_PANES}` : 'on a wider screen', run: () => pickWindow('Show beside', (s, w) => addPane(s, w), shownNote) },
+    ...(n > 2 ? ['-', { label: 'Big view and a stack', checked: (T.arr || 'main') === 'main', run: () => { T.arr = 'main'; layout(); } },
+      { label: 'Side by side', checked: T.arr === 'cols', run: () => { T.arr = 'cols'; layout(); } }] : []),
+    ...(n > 1 ? ['-', { label: T.zoom ? 'Show all views' : 'Zoom the focused view', icon: 'columns', run: toggleZoom },
+      { label: 'Back to one view', icon: 'x', run: () => { for (const p of T.panes.filter((x) => x !== focused())) closePane(p); } }] : []),
+    '-', { label: document.body.classList.contains('focusmode') ? 'Show the toolbars' : 'Hide the toolbars (focus mode)', icon: 'layers', run: () => setFocusMode(!document.body.classList.contains('focusmode')) },
+  ]);
+});
+function setFocusMode(on) { document.body.classList.toggle('focusmode', on); store.set('focusmode', on); layout(); }
+document.body.classList.toggle('focusmode', store.get('focusmode', false));
+$('#btn-unfocus').addEventListener('click', () => setFocusMode(false));
 
 // phones suspend sockets in the background; reconnect as soon as we're visible again
 document.addEventListener('visibilitychange', () => {
@@ -281,18 +352,23 @@ function renderAgents() {
   const list = allAgents(), cur = focused();
   const n = list.filter((a) => a.state === 'blocked').length;
   $('#t-agents-n').hidden = !n; $('#t-agents-n').textContent = n;
-  $('#btn-agents').hidden = !list.length;
-  const show = list.length > 0 && agentsOpen();
+  const shells = S.sessions.filter((s) => !s.windows.some((w) => (w.panes || []).some((p) => p.agent)));
+  $('#btn-agents').hidden = !list.length && !shells.length;
+  const show = (list.length > 0 || shells.length > 0) && agentsOpen();
   $('#t-agents').hidden = !show; $('#btn-agents').setAttribute('aria-expanded', String(show));
+  // with three or more views the panel folds to its state dots, so the terminals keep their width
+  $('#t-agents').classList.toggle('mini', wide.matches && T.panes.length >= 3);
   if (!show) return;
-  const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.prompt?.question, a.p.status?.last, a.w.name]), cur?.s, cur?.win?.index]);
+  const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.prompt?.question, a.p.status?.last, a.w.name]), shells.map((s) => [s.name, s.windows.some((w) => w.running)]), cur?.s, cur?.win?.index, T.panes.map((p) => p.s), T.panes.length >= 3]);
   if ($('#t-agents').dataset.sig === sig) return;
   $('#t-agents').dataset.sig = sig;
-  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button class="ag ag-${a.state}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
+  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button draggable="true" class="ag ag-${a.state}" title="${esc(`${a.agent} ${a.s.name}: ${AG_LABEL[a.state]}`)}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
     aria-current="${cur?.s === a.s.name && cur?.win?.index === a.w.index}">
     <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}${a.s.windows.length > 1 ? ` › ${esc(a.w.name)}` : ''}</span></span>
     <span class="ag-st">${AG_LABEL[a.state]} · ${ago(a.since / 1000)}</span>
-    ${a.p.prompt?.question || a.p.status?.last ? `<span class="ag-l">${esc(a.p.prompt?.question || a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>`;
+    ${a.p.prompt?.question || a.p.status?.last ? `<span class="ag-l">${esc(a.p.prompt?.question || a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>
+    ${shells.length ? `<h2 class="small muted">Other sessions</h2><ul>${shells.map((s) => { const w = activeWin(s); return `<li><button draggable="true" class="ag ag-shell" title="${esc(s.name)}" data-s="${esc(s.name)}" data-w="${w.index}" data-p="${activePane(w).index}" aria-current="${cur?.s === s.name}">
+    <span class="dot ${s.windows.some((x) => x.running) ? 'run' : ''}"></span><span class="ag-t"><b>${esc(s.name)}</b> <span class="muted">${esc(activePane(w).cmd || 'shell')}</span></span></button></li>`; }).join('')}</ul>` : ''}`;
 }
 $('#btn-agents').addEventListener('click', () => {
   if (wide.matches) store.set('agentsPanel', !store.get('agentsPanel', true));
@@ -310,17 +386,24 @@ $('#t-agents').addEventListener('click', async (e) => {
   const b = e.target.closest('.ag'); if (!b) return;
   if (!wide.matches && agentsBack) { agentsBack(); closeAgents(); }
   await act(`${W(b.dataset.s, `${b.dataset.w}.${b.dataset.p}`)}/select`).catch(() => {}); // land on the agent's pane, not just its window
-  openTerm(b.dataset.s, +b.dataset.w); refresh();
+  if ($('#term').hidden || !T.panes.length) openTerm(b.dataset.s, +b.dataset.w); else { addTab(b.dataset.s); switchTo(b.dataset.s, +b.dataset.w, !wide.matches); }
+  refresh();
 });
 wide.addEventListener('change', () => { $('#t-agents').dataset.sig = ''; renderAgents(); });
 
 export function renderTermBar() {
   renderAgents();
   const p = focused(); if (!p) return;
+  // toolbar and question sit inside the focused view, so moving focus never shifts the other views
+  if ($('#t-head').parentElement !== p.el) { $('.tph', p.el).after($('#t-head')); $('#t-ask').dataset.sig = ''; }
   const s = p.sess, w = p.win;
   renderSessTabs();
-  for (const x of T.panes) { $('.tpn', x.el).textContent = `${x.s} › ${x.win?.name ?? ''}${x.win ? ` · ${whereText(x.win)}` : ''}`; if (x.view && x.sess?.views[x.view] != null) x.wIdx = x.sess.views[x.view]; }
+  for (const x of T.panes) {
+    const st = x.win?.prompt ? 'blocked' : x.win?.panes?.find((q) => q.agent)?.agent.state || (x.win?.running ? 'running' : '');
+    $('.tps', x.el).textContent = st === 'blocked' ? 'needs you' : st; $('.tps', x.el).className = `tps st-${st}`;
+    $('.tpn', x.el).textContent = `${x.s} › ${x.win?.name ?? ''}${x.win ? ` · ${whereText(x.win)}` : ''}`; if (x.view && x.sess?.views[x.view] != null) x.wIdx = x.sess.views[x.view]; }
   if (!s || !w) return;
+  $('#term .termbar').hidden = s.windows.length < 2;
   // tabs: dot = state, ring = output you haven't looked at
   const key = (i) => `${p.s}:${i}`;
   lastSeen[key(w.index)] = Math.max(lastSeen[key(w.index)] || 0, w.activity);
@@ -368,7 +451,7 @@ export function renderTermBar() {
     const sig2 = JSON.stringify(asking.prompt);
     if (ab.dataset.sig !== sig2) {
       ab.dataset.sig = sig2; ab.dataset.t = `${w.index}.${asking.index}`;
-      ab.innerHTML = `<div class="aq"><span class="dot ask-dot"></span>${esc(asking.prompt.question)}</div><div class="aopts">${asking.prompt.options.map((o) =>
+      ab.innerHTML = `<div class="aq"><span class="dot ask-dot"></span>${esc(asking.prompt.question)}${asking.prompt.context ? `<code class="actx">${esc(asking.prompt.context)}</code>` : ''}</div><div class="aopts">${asking.prompt.options.map((o) =>
         `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label)}</button>`).join('')}</div>`;
     }
   }
@@ -418,17 +501,18 @@ async function renameSession() {
   store.set(tabsKey(), openTabs().map((n) => n === from ? to : n));
   history.replaceState({ term: to }, ''); p.s = to; await refresh(); p.connect();
 }
-$('#btn-addwin').addEventListener('click', (e) => {
+$('#btn-addwin').addEventListener('click', (e) => newWindowMenu(e.currentTarget));
+function newWindowMenu(anchor) {
   const p = focused(); if (!p) return;
   const cwd = p.win ? activePane(p.win).cwd : '';
-  menu(e.currentTarget, [
+  menu(anchor, [
     { label: 'Claude Code…', icon: 'spark', sub: 'new, continue or resume', run: () => openAgent({ kind: 'claude', s: p.s, cwd, where: 'window' }) },
     { label: 'Codex…', icon: 'target', sub: 'new, continue or resume', run: () => openAgent({ kind: 'codex', s: p.s, cwd, where: 'window' }) },
     '-',
     ...presetItems(async (pr) => {
       await act(`/api/sessions/${encodeURIComponent(p.s)}/windows`, { preset: pr.id }); toast(`Opened ${pr.label}`); refresh();
     }), '-', { label: 'In another folder…', icon: 'folder', run: () => openNew('window', p.s) }]);
-});
+}
 
 const renameWin = (value) => ask({ title: 'Rename window', label: 'Name', value, ok: 'Rename', validate: (v) => v ? '' : 'Enter a name.' });
 const cur = () => { const p = focused(); const w = p?.win; return w && { p, w, ap: activePane(w), t: W(p.s, w.index) }; };
@@ -446,14 +530,16 @@ $('#w-toggle').addEventListener('click', async (e) => {
 });
 $('#w-restart').addEventListener('click', async () => {
   const c = cur(); if (!c) return;
+  if (c.ap.running && !await ask({ title: `Restart ${c.ap.cmd}?`, message: 'Sends Ctrl+C, then runs the command again.', ok: 'Restart', danger: true })) return;
   if (c.ap.running) { await act(`${c.t}/stop`); await new Promise((r) => setTimeout(r, 900)); }
   await act(`${c.t}/start`); toast(`Restarted ${c.ap.preset}`); setTimeout(refresh, 700);
 });
-$('#w-panes').addEventListener('click', (e) => {
+$('#w-panes').addEventListener('click', (e) => panesMenu(e.currentTarget));
+function panesMenu(anchor) {
   const c = cur(); if (!c) return;
   const pane = (action) => async () => { await act(`${c.t}/pane`, { action }); refresh(); };
-  const split = (dir) => () => menu(e.target, presetItems(async (pr) => { await act(`${c.t}/split`, { dir, preset: pr.id }); refresh(); }));
-  menu(e.currentTarget, [
+  const split = (dir) => () => menu(anchor, presetItems(async (pr) => { await act(`${c.t}/split`, { dir, preset: pr.id }); refresh(); }));
+  menu(anchor, [
     { label: 'Split right', icon: 'columns', run: split('right') },
     { label: 'Split down', icon: 'rows', run: split('down') },
     { label: 'Next pane', icon: 'next', disabled: c.w.panes.length < 2, run: pane('next') },
@@ -465,6 +551,52 @@ $('#w-panes').addEventListener('click', (e) => {
       if (await ask({ title: `Close pane ${c.ap.index}?`, message: `${c.ap.cmd} in this pane stops.`, ok: 'Close pane', danger: true })) { await act(W(c.p.s, `${c.w.index}.${c.ap.index}`), null, 'DELETE'); refresh(); }
     } },
   ]);
+}
+// narrow views fold the less-used tools into ⋯ (container query decides which show inline)
+$('#w-more').addEventListener('click', (e) => {
+  const a = e.currentTarget, click = (id) => () => $(id).click();
+  menu(a, [
+    ...(!$('#w-restart').hidden ? [{ label: 'Restart', icon: 'refresh', run: click('#w-restart') }] : []),
+    { label: 'Panes…', icon: 'columns', run: () => setTimeout(() => panesMenu(a), 0) },
+    { label: 'Snippets…', icon: 'terminal', run: () => setTimeout(() => snippets(a), 0) },
+    { label: 'Attach a file', icon: 'plus', run: click('#attach') },
+    ...(!$('#mic').hidden ? [{ label: 'Dictate', icon: 'spark', run: click('#mic') }] : []),
+    { label: 'Find in output', icon: 'search', run: click('#w-find') },
+    { label: 'Scroll back', icon: 'left', run: click('#w-scroll') },
+    '-',
+    { label: 'Smaller text', run: click('#w-font-dec') }, { label: 'Larger text', run: click('#w-font-inc') },
+    '-',
+    { label: 'Close window', icon: 'trash', danger: true, run: click('#w-kill') },
+  ]);
+});
+// drag a session (tab or Agents row) onto a view: the middle shows it there, the left/right edge adds a view on that side
+let dragDrop = null;
+const dragData = (e) => { try { return JSON.parse(e.dataTransfer.getData('text/x-tmuxlab')); } catch { return null; } };
+document.addEventListener('dragstart', (e) => {
+  const b = e.target.closest?.('#t-agents .ag, #t-stabs .stab-b'); if (!b) return;
+  e.dataTransfer.setData('text/x-tmuxlab', JSON.stringify({ s: b.dataset.s, w: b.dataset.w != null ? +b.dataset.w : null }));
+  e.dataTransfer.effectAllowed = 'copy'; document.body.classList.add('dragging');
+});
+document.addEventListener('dragend', () => { document.body.classList.remove('dragging'); for (const x of $$('.tpane[data-drop]')) delete x.dataset.drop; });
+$('#terms').addEventListener('dragover', (e) => {
+  const el = e.target.closest('.tpane'); if (!el || !e.dataTransfer.types.includes('text/x-tmuxlab')) return;
+  e.preventDefault();
+  const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+  const zone = T.panes.length < MAX_PANES && canSplit() ? (x < .22 ? 'left' : x > .78 ? 'right' : 'here') : 'here';
+  for (const o of $$('.tpane[data-drop]')) if (o !== el) delete o.dataset.drop;
+  el.dataset.drop = zone; dragDrop = { el, zone };
+});
+$('#terms').addEventListener('dragleave', (e) => { if (!e.relatedTarget || !$('#terms').contains(e.relatedTarget)) for (const x of $$('.tpane[data-drop]')) delete x.dataset.drop; });
+$('#terms').addEventListener('drop', (e) => {
+  const d = dragData(e); if (!d || !dragDrop) return;
+  e.preventDefault(); delete dragDrop.el.dataset.drop;
+  const i = T.panes.findIndex((p) => p.el === dragDrop.el), w = d.w ?? undefined;
+  if (dragDrop.zone === 'here') return showIn(i, d.s, w);
+  if (T.panes.some((p) => p.s === d.s && (w == null || p.win?.index === w))) return toast(`${d.s} is already on screen: drop it in the middle of a view to swap`);
+  addPane(d.s, w);
+  const to = dragDrop.zone === 'left' ? i : i + 1;
+  for (let k = T.panes.length - 1; k > to; k--) swapSlots(k, k - 1);
+  setFocus(to);
 });
 // ---------- agent controls: the commands and keys Claude Code and Codex understand ----------
 export const agentOf = (pane) => pane?.agent ? (/^(claude|codex)$/.test(pane.agent.agent) ? pane.agent.agent : null) : /^(claude|codex)$/.test(pane?.cmd) ? pane.cmd : /\b(claude|codex)\b/.exec(pane?.running ? pane.preset || '' : '')?.[1] || null;

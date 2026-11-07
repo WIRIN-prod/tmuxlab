@@ -63,9 +63,15 @@ const matches = (s) => { const q = $('#q').value.trim().toLowerCase(); return !q
 const visible = () => S.sessions.filter(matches).filter((s) => S.filter === 'all' ||
   (S.filter === 'running' ? s.windows.some((w) => w.running) : S.filter === 'waiting' ? s.windows.some((w) => w.prompt) : !s.windows.some((w) => w.running)));
 
+// the same state pill the terminal views show
+const AG_TXT = { working: 'working', blocked: 'needs you', done: 'done' };
+function agState(s) {
+  const a = s.windows.flatMap((w) => w.panes || []).map((p) => p.agent?.state).find((x) => AG_TXT[x]);
+  return a ? `<span class="tps st-${a}">${AG_TXT[a]}</span>` : '';
+}
 function promptHtml(s, w) {
   const p = w.panes.find((x) => x.prompt);
-  return `<div class="ask" data-t="${w.index}.${p.index}"><div class="aq"><span class="dot ask-dot"></span><b>${esc(w.name)}</b> ${esc(p.prompt.question)}</div>
+  return `<div class="ask" data-t="${w.index}.${p.index}"><div class="aq"><span class="dot ask-dot"></span>${s.windows.length > 1 ? `<b>${esc(w.name)}</b> ` : ''}${esc(p.prompt.question)}${p.prompt.context ? `<code class="actx">${esc(p.prompt.context)}</code>` : ''}</div>
     <div class="aopts">${p.prompt.options.map((o) => `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label)}</button>`).join('')}</div></div>`;
 }
 
@@ -73,9 +79,10 @@ const FOLDER = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="tru
 const collapsed = new Set(store.get('collapsed', []));
 export const projectOf = (s) => S.projects.some((p) => p.id === s.project) ? s.project : '';
 
+const mLabel = (m, i) => m.name || (i === S.cur && S.info ? `${S.info.user}@${S.info.host}` : new URL(m.base).host);
 export function renderWall() {
   renderStats();
-  $('#machine-name').textContent = cfg()?.name || (S.info ? `${S.info.user}@${S.info.host}` : '');
+  $('#machine-name').textContent = cfg() ? mLabel(cfg(), S.cur) : '';
   $('#empty').hidden = S.sessions.length > 0 || S.projects.length > 0;
   const grid = $('#grid');
   grid.classList.toggle('list', view === 'list');
@@ -144,7 +151,7 @@ function cardFor(s) {
   if (card.dataset.sig === sig) return card;
   card.dataset.sig = sig;
   const st = S.stats?.sessions[s.name];
-  $('.card-h', card).innerHTML = `<span class="dot ${hasRun ? 'run' : ''}"></span><h3>${esc(s.name)}</h3>
+  $('.card-h', card).innerHTML = `<span class="dot ${hasRun ? 'run' : ''}"></span><h3>${esc(s.name)}</h3>${agState(s)}
     <span class="when">${s.attached ? `<span class="att">${s.attached} viewing</span> · ` : ''}${ago(s.activity)}</span>`;
   $('.wins', card).hidden = s.windows.length < 2; // one window: the where-line already says what runs
   $('.wins', card).innerHTML = s.windows.map((w) => `<button class="win ${w.active ? 'active' : ''}" data-w="${w.index}" title="${esc(w.cmd)}">
@@ -177,8 +184,8 @@ function rowFor(s) {
   const usage = S.stats?.sessions[s.name];
   $('.srow-m', row).setAttribute('aria-label', `Open ${s.name}`);
   $('.srow-m', row).innerHTML = `<span class="tile st-${st}" title="${st === 'ask' ? 'Waiting for you' : st === 'run' ? 'Running' : 'Idle'}">${icon(rp ? presetIcon({ cmd: rp.cmd }) : 'terminal')}</span>
-    <span class="srow-t"><span class="l1"><h3>${esc(s.name)}</h3>${s.windows.length > 1 ? `<span class="cnt">${s.windows.length} windows</span>` : ''}${s.attached ? `<span class="cnt att">${s.attached} viewing</span>` : ''}</span>
-    <span class="where">${whereHtml(aw)}</span>${rp?.status?.last ? `<span class="srow-s">${rp.status.mode ? `<span class="mode">${esc(rp.status.mode)}</span>` : ''}${esc(rp.status.last)}</span>` : ''}</span>
+    <span class="srow-t"><span class="l1"><h3>${esc(s.name)}</h3>${agState(s)}${s.windows.length > 1 ? `<span class="cnt">${s.windows.length} windows</span>` : ''}${s.attached ? `<span class="cnt att">${s.attached} viewing</span>` : ''}</span>
+    <span class="where">${whereHtml(aw)}</span>${rp?.status?.last && !asks.length ? `<span class="srow-s">${rp.status.mode ? `<span class="mode">${esc(rp.status.mode)}</span>` : ''}${esc(rp.status.last)}</span>` : ''}</span>
     <span class="srow-r"><span class="when">${ago(s.activity)}</span><span class="use">${usage ? `${Math.round(usage.cpu)}% · ${bytes(usage.rss)}` : ''}</span></span>`;
   $('.asks', row).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
   return row;
@@ -335,7 +342,7 @@ async function countMachines() {
 function renderMachines() {
   const run = S.sessions.filter((s) => s.windows.some((w) => w.running)).length;
   const html = S.machines.map((m, i) => {
-    const host = new URL(m.base).host, name = m.name || host, c = i === S.cur ? { n: S.sessions.length, run } : counts[m.base];
+    const host = new URL(m.base).host, name = mLabel(m, i), c = i === S.cur ? { n: S.sessions.length, run } : counts[m.base];
     return `<button class="nav-item mach" data-m="${i}" ${i === S.cur ? 'aria-current="true"' : ''}>
       <span class="tile ${c === null ? 'st-off' : c?.run ? 'st-run' : 'st-idle'}">${esc(name[0].toUpperCase())}</span>
       <span class="mt"><b>${esc(name)}</b><small>${c === null ? 'offline' : c ? `${c.n} session${c.n === 1 ? '' : 's'}${c.run ? ` · ${c.run} running` : ''}` : esc(host)}</small></span></button>`;
@@ -377,7 +384,7 @@ $('#machine').addEventListener('click', async (e) => {
   const counts = await Promise.all(S.machines.map((m) => api('/api/sessions', { m, timeout: 3000 })
     .then((l) => `${l.length} sessions, ${l.flatMap((s) => s.windows).filter((w) => w.running).length} running`, () => 'offline')));
   menu(anchor, [
-    ...S.machines.map((m, i) => ({ label: m.name || new URL(m.base).host, sub: `${new URL(m.base).host} · ${counts[i]}`, checked: i === S.cur,
+    ...S.machines.map((m, i) => ({ label: mLabel(m, i), sub: mLabel(m, i) === new URL(m.base).host ? counts[i] : `${new URL(m.base).host} · ${counts[i]}`, checked: i === S.cur,
       run: () => { S.cur = i; saveMachines(); start(); } })),
     '-',
     { label: 'Add machine', icon: 'plus', run: () => addMachine() },

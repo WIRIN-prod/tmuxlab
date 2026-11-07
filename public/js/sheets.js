@@ -1,7 +1,7 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
 import { $, $$, esc, S, api, act, W, toast, store, busy, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText, icon, presetIcon, ago } from './core.js';
 import { refresh } from './wall.js';
-import { openTerm, setFont, setTheme, T, THEMES } from './term.js';
+import { openTerm, addPane, setFont, setTheme, T, THEMES } from './term.js';
 import { start } from './main.js';
 import qrcode from '../vendor/qrcode.js';
 
@@ -219,7 +219,7 @@ $('#find-copy').addEventListener('click', async () => {
 const dPal = $('#dlg-palette');
 let pal = { items: [], sel: 0, pick: null };
 export function openPalette() { pal.pick = null; $('#pal-q').placeholder = 'Jump to session or window…'; openPal(); }
-export function pickWindow(title, cb) { pal.pick = cb; $('#pal-q').placeholder = title; openPal(); }
+export function pickWindow(title, cb, note) { pal.pick = cb; pal.note = note; $('#pal-q').placeholder = title; openPal(); }
 function openPal() { $('#pal-q').value = ''; pal.sel = 0; renderPal(); dPal.showModal(); $('#pal-q').focus(); }
 function renderPal() {
   const q = $('#pal-q').value.toLowerCase();
@@ -227,7 +227,7 @@ function renderPal() {
   pal.items = [
     ...S.sessions.flatMap((s) => [
       ...(pal.pick ? [] : [{ label: s.name, meta: [S.projects.find((p) => p.id === s.project)?.label, `${s.windows.length} window${s.windows.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '), dot: s.windows.some((w) => w.running) ? 'run' : '', go: go(s.name) }]),
-      ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: whereText(w), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
+      ...s.windows.map((w) => ({ label: `${s.name} › ${w.name}`, meta: [pal.pick && pal.note?.(s.name, w.index), whereText(w)].filter(Boolean).join(' · '), dot: w.prompt ? 'ask-dot' : winState(w), go: go(s.name, w.index) })),
     ]),
     ...(pal.pick ? [] : [{ label: 'New session…', meta: '', go: () => openNew() }, { label: 'Schedules', meta: '', go: openSchedules }, { label: 'Settings', meta: '', go: openSettings }]),
   ].filter((x) => `${x.label} ${x.meta}`.toLowerCase().includes(q)).slice(0, 60);
@@ -344,7 +344,9 @@ const OPTS = {
 export function openAgent(ctx) {
   ag.ctx = ctx; ag.conv = 'new'; $('#ag-err').textContent = ''; $('#ag-fork').checked = false;
   ag.where = ctx.t ? ctx.where : 'window';
-  for (const b of $$('#ag-where [data-w]')) { b.setAttribute('aria-checked', b.dataset.w === ag.where); b.disabled = b.dataset.w === 'pane' && !ctx.t; }
+  if (ag.where === 'beside' && (T.panes.length >= 4 || innerWidth < 768)) ag.where = 'window';
+  for (const b of $$('#ag-where [data-w]')) { b.setAttribute('aria-checked', b.dataset.w === ag.where); b.disabled = b.dataset.w === 'pane' && !ctx.t || b.dataset.w === 'beside' && ($('#term').hidden || T.panes.length >= 4 || innerWidth < 768); }
+  $('#ag-first').value = '';
   setKind(ctx.kind || store.get('agentKind', 'claude'));
   dAg.showModal();
 }
@@ -377,10 +379,12 @@ function agCmd() {
   if (!/^(new|last|[\w-]{1,80})$/.test(c)) throw new Error('That conversation id looks wrong.'); // it is typed into a shell
   if (ag.kind === 'claude') return ['claude', c === 'last' && '--continue', c !== 'new' && c !== 'last' && `--resume ${c}`,
     c !== 'new' && $('#ag-fork').checked && '--fork-session', v('mode') && `--permission-mode ${v('mode')}`, model && `--model ${model}`,
-    $('#ag-rc').checked && `--remote-control ${ag.ctx.s || 'tmuxlab'}`].filter(Boolean).join(' ');
+    $('#ag-rc').checked && `--remote-control ${ag.ctx.s || 'tmuxlab'}`, first()].filter(Boolean).join(' ');
   const mode = { ro: '-s read-only', auto: '-s workspace-write -a on-request', full: '--dangerously-bypass-approvals-and-sandbox' }[v('mode')];
-  return [c === 'new' ? 'codex' : c === 'last' ? 'codex resume --last' : `codex resume ${c}`, mode, model && `-m ${model}`, $('#ag-search').checked && '--search'].filter(Boolean).join(' ');
+  return [c === 'new' ? 'codex' : c === 'last' ? 'codex resume --last' : `codex resume ${c}`, mode, model && `-m ${model}`, $('#ag-search').checked && '--search', first()].filter(Boolean).join(' ');
 }
+// the first message goes in as the agent's opening prompt, single-quoted for the shell
+const first = () => { const m = $('#ag-first').value.trim(); return m && `'${m.replace(/'/g, `'\\''`)}'`; };
 function renderAgCmd() {
   $('#ag-fork-row').hidden = ag.kind !== 'claude' || ag.conv === 'new';
   try { $('#ag-cmd').textContent = agCmd(); $('#ag-err').textContent = ''; } catch (e) { $('#ag-err').textContent = e.message; }
@@ -398,7 +402,10 @@ $('#ag-go').addEventListener('click', () => busy($('#ag-go'), async () => {
   const { s, t, cwd } = ag.ctx;
   try {
     if (ag.where === 'pane') await api(`${t}/start`, { method: 'POST', body: { cmd } });
-    else await api(`/api/sessions/${encodeURIComponent(s)}/windows`, { method: 'POST', body: { cmd, label: ag.kind, ...(cwd ? { cwd } : {}) } });
+    else {
+      const r = await api(`/api/sessions/${encodeURIComponent(s)}/windows`, { method: 'POST', body: { cmd, label: ag.kind, ...(cwd ? { cwd } : {}) } });
+      if (ag.where === 'beside' && !$('#term').hidden) setTimeout(() => addPane(s, r.window), 300);
+    }
   } catch (e) { $('#ag-err').textContent = e.message; return; }
   dAg.close(); toast(`Started ${ag.kind === 'claude' ? 'Claude Code' : 'Codex'}`); setTimeout(refresh, 600);
 }));

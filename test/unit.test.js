@@ -65,3 +65,14 @@ test('the tmuxlab command refuses pane names that would make tmux pick the curre
     assert.equal(r.stdout, '');
   }
 });
+
+test('a Claude prompt carries what it asks about', () => {
+  const p = detectPrompt(`╭──────────────────────────────╮
+│ Bash command                  │
+│   git push origin main        │
+│ Do you want to proceed?       │
+│ ❯ 1. Yes                      │
+│   2. No                       │
+╰──────────────────────────────╯`);
+  assert.equal(p.context, 'git push origin main');
+});

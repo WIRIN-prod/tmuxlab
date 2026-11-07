@@ -142,40 +142,44 @@
     <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions"><svg class="ico" aria-hidden="true"><use href="#i-left"/></svg></button>
     <nav class="stabs" id="t-stabs" aria-label="Open sessions"></nav>
     <button class="btn ghost agents-btn" id="btn-agents" aria-controls="t-agents" aria-expanded="false" title="Every agent and what it's doing"><svg class="ico" aria-hidden="true"><use href="#i-layers"/></svg><span class="lbl">Agents</span><span class="badge" id="t-agents-n" hidden></span></button>
+    <button class="btn ghost icon" id="btn-split" aria-label="Layout" title="Layout: views side by side, zoom, focus mode" aria-haspopup="menu"><svg class="ico" aria-hidden="true"><use href="#i-columns"/></svg></button>
     <button class="btn ghost icon" id="btn-opensess" aria-label="Open another session" title="Open another session" aria-haspopup="menu"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
     <span class="conn" id="t-conn" role="status"><span class="sr-only" id="t-conn-l">Connecting</span></span>
   </header>
   <header class="termbar">
     <nav class="tabs" id="t-tabs" aria-label="Windows"></nav>
     <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
-    <button class="btn ghost icon" id="btn-split" aria-label="Show another window beside this one" title="Split view"><svg class="ico" aria-hidden="true"><use href="#i-columns"/></svg></button>
   </header>
+  <div class="vhead" id="t-head">
   <div class="wbar" id="t-wbar">
     <div class="where wcmd" id="t-where" aria-label="Where this window runs"></div>
     <div class="wacts">
     <button class="btn sm" id="w-toggle"></button>
-    <button class="btn sm ghost" id="w-restart" title="Interrupt and rerun">Restart</button>
+    <button class="btn sm ghost ov" id="w-restart" title="Interrupt and rerun">Restart</button>
     <button class="btn sm ghost" id="w-agent" aria-haspopup="menu" hidden></button>
     <button class="btn sm ghost" id="w-ports" aria-haspopup="menu" title="Open a dev server from this session" hidden></button>
-    <span class="sep" aria-hidden="true"></span>
     <button class="btn sm ghost branch" id="w-changes" title="Changes, commit and pull request" hidden></button>
-    <button class="btn sm ghost" id="w-panes" aria-haspopup="menu">Panes</button>
-    <button class="btn sm ghost" id="w-snip" aria-haspopup="menu" title="Run a saved command">Snippets</button>
-    <button class="btn sm ghost" id="attach" title="Upload a file or photo and type its path">Attach</button><input type="file" id="attach-file" multiple hidden>
-    <button class="btn sm ghost" id="mic" aria-pressed="false" title="Dictate into the terminal" hidden>Dictate</button>
-    <button class="btn sm ghost" id="w-find" title="Search and copy output">Find</button>
-    <button class="btn sm ghost" id="w-scroll" title="Scroll back (tmux copy mode)">History</button>
-    <span class="sep" aria-hidden="true"></span>
-    <button class="btn sm ghost icon" id="w-font-dec" aria-label="Smaller text">A−</button>
-    <button class="btn sm ghost icon" id="w-font-inc" aria-label="Larger text">A+</button>
-    <button class="btn sm ghost icon" id="w-kill" aria-label="Close window" title="Close window"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>
+    <span class="sep ov" aria-hidden="true"></span>
+    <button class="btn sm ghost ov" id="w-panes" aria-haspopup="menu">Panes</button>
+    <button class="btn sm ghost ov" id="w-snip" aria-haspopup="menu" title="Run a saved command">Snippets</button>
+    <button class="btn sm ghost ov" id="attach" title="Upload a file or photo and type its path">Attach</button><input type="file" id="attach-file" multiple hidden>
+    <button class="btn sm ghost ov" id="mic" aria-pressed="false" title="Dictate into the terminal" hidden>Dictate</button>
+    <button class="btn sm ghost ov" id="w-find" title="Search and copy output">Find</button>
+    <button class="btn sm ghost ov" id="w-scroll" title="Scroll back (tmux copy mode)">History</button>
+    <span class="sep ov" aria-hidden="true"></span>
+    <button class="btn sm ghost icon ov" id="w-font-dec" aria-label="Smaller text">A−</button>
+    <button class="btn sm ghost icon ov" id="w-font-inc" aria-label="Larger text">A+</button>
+    <button class="btn sm ghost icon ov" id="w-kill" aria-label="Close window" title="Close window"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>
+    <button class="btn sm ghost icon" id="w-more" aria-label="More actions" aria-haspopup="menu" title="More"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg></button>
     </div>
   </div>
   <div class="pchips" id="t-panes" hidden></div>
   <div class="ask bar" id="t-ask" hidden></div>
+  </div>
   <div class="tmain">
     <aside class="agents" id="t-agents" aria-label="Agents" hidden></aside>
     <div class="terms" id="terms" data-n="1"></div>
+    <button class="btn sm unfocus" id="btn-unfocus" title="Show the toolbars again">Show toolbars</button>
   </div>
   <div class="keys" id="keys" role="toolbar" aria-label="Extra keys"></div>
 </section>
@@ -343,7 +347,9 @@
     <div class="seg" id="ag-where" role="radiogroup" aria-label="Where to run it">
       <button type="button" role="radio" data-w="pane">In this window</button>
       <button type="button" role="radio" data-w="window">In a new window</button>
+      <button type="button" role="radio" data-w="beside">Beside this one</button>
     </div>
+    <label class="field"><span>First message <span class="muted">(optional)</span></span><textarea id="ag-first" rows="2" placeholder="What should it work on?"></textarea></label>
     <p class="err" id="ag-err" role="alert"></p>
     <div class="row end"><button type="button" class="btn ghost" data-close>Cancel</button><button type="button" class="btn primary" id="ag-go">Start</button></div>
   </form>
