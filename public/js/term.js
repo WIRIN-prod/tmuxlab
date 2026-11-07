@@ -57,6 +57,7 @@ class Pane {
   mount(parent, before = null) {
     parent.insertBefore(this.el, before);
     this.term.open($('.xt', this.el));
+    if (touch) softKeyboard(this);
     new ResizeObserver(() => { if (!$('#term').hidden) try { this.fit.fit(); } catch {} }).observe($('.tbody', this.el));
   }
   get sess() { return findSess(this.s); }
@@ -540,6 +541,37 @@ function touchScroll(p) {
     };
     fling = requestAnimationFrame(step);
   }, o);
+}
+
+// ---------- phone keyboards ----------
+// Android keyboards edit whole words (autocorrect, predictions), which xterm misreads: backspace could bring the
+// deleted text back. So on touch screens we read what the keyboard did to the text box and send the difference:
+// one DEL per removed character, then the new text. Real key presses (Enter, arrows, a hardware keyboard) still go to xterm.
+const PAD = '  '; // keeps something in the box, so backspace on an "empty" line still reaches us
+function softKeyboard(p) {
+  const ta = $('textarea', p.el); if (!ta) return;
+  let prev = ta.value = PAD, composing = false;
+  const reset = () => { ta.value = prev = PAD; };
+  const mine = (e) => e.target === ta;
+  p.el.addEventListener('keydown', (e) => { if (mine(e) && (e.keyCode === 229 || e.isComposing)) e.stopPropagation(); }, true);
+  for (const ev of ['compositionstart', 'compositionupdate', 'compositionend']) {
+    p.el.addEventListener(ev, (e) => {
+      if (!mine(e)) return;
+      e.stopPropagation(); composing = ev !== 'compositionend';
+      if (!composing) setTimeout(() => { if (!composing && ta.value === prev && /\s$/.test(prev)) reset(); });
+    }, true);
+  }
+  p.el.addEventListener('input', (e) => {
+    if (!mine(e)) return;
+    e.stopPropagation();
+    const v = ta.value;
+    let k = 0; while (k < v.length && k < prev.length && v[k] === prev[k]) k++;
+    const out = '\x7f'.repeat(prev.length - k) + v.slice(k).replace(/\r?\n/g, '\r');
+    prev = v;
+    if (out) p.send(applyMods(out));
+    if (!composing && (v.length < PAD.length || /[\s]$/.test(v) || v.length > 200)) reset(); // between words: start fresh
+  }, true);
+  p.el.addEventListener('focusin', (e) => { if (mine(e) && !composing) reset(); }, true);
 }
 
 // ---------- extra keys for touch keyboards ----------
