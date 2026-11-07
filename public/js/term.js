@@ -1,5 +1,5 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
-import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText, icon, openPort } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent } from './sheets.js';
 
@@ -267,7 +267,48 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) T.wak
 
 // ---------- bars ----------
 const lastSeen = store.get('seen', {});
+// ---------- agents panel: every agent on this machine, the ones that need you first ----------
+const AG_ORDER = { blocked: 0, done: 1, working: 2, idle: 3 };
+const AG_LABEL = { blocked: 'needs you', done: 'done', working: 'working', idle: 'idle' };
+const wide = matchMedia('(min-width: 1100px)');
+const agentsOpen = () => wide.matches ? store.get('agentsPanel', true) : $('#btn-agents').getAttribute('aria-expanded') === 'true';
+function allAgents() {
+  const out = [];
+  for (const s of S.sessions) for (const w of s.windows) for (const p of w.panes || []) if (p.agent) out.push({ s, w, p, ...p.agent });
+  return out.sort((a, b) => AG_ORDER[a.state] - AG_ORDER[b.state] || b.since - a.since);
+}
+function renderAgents() {
+  const list = allAgents(), cur = focused();
+  const n = list.filter((a) => a.state === 'blocked' || a.state === 'done').length;
+  $('#t-agents-n').hidden = !n; $('#t-agents-n').textContent = n;
+  $('#btn-agents').hidden = !list.length;
+  const show = list.length > 0 && agentsOpen();
+  $('#t-agents').hidden = !show; $('#btn-agents').setAttribute('aria-expanded', String(show));
+  if (!show) return;
+  const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.status?.last, a.w.name]), cur?.s, cur?.win?.index]);
+  if ($('#t-agents').dataset.sig === sig) return;
+  $('#t-agents').dataset.sig = sig;
+  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button class="ag ag-${a.state}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
+    aria-current="${cur?.s === a.s.name && cur?.win?.index === a.w.index}">
+    <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}${a.s.windows.length > 1 ? ` › ${esc(a.w.name)}` : ''}</span></span>
+    <span class="ag-st">${AG_LABEL[a.state]} · ${ago(a.since / 1000)}</span>
+    ${a.p.status?.last ? `<span class="ag-l">${esc(a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>`;
+}
+$('#btn-agents').addEventListener('click', () => {
+  if (wide.matches) store.set('agentsPanel', !store.get('agentsPanel', true));
+  else $('#btn-agents').setAttribute('aria-expanded', String(!agentsOpen()));
+  $('#t-agents').dataset.sig = ''; renderAgents(); layout();
+});
+$('#t-agents').addEventListener('click', async (e) => {
+  const b = e.target.closest('.ag'); if (!b) return;
+  if (!wide.matches) $('#btn-agents').setAttribute('aria-expanded', 'false');
+  await act(`${W(b.dataset.s, `${b.dataset.w}.${b.dataset.p}`)}/select`).catch(() => {}); // land on the agent's pane, not just its window
+  openTerm(b.dataset.s, +b.dataset.w); refresh();
+});
+wide.addEventListener('change', () => { $('#t-agents').dataset.sig = ''; renderAgents(); });
+
 export function renderTermBar() {
+  renderAgents();
   const p = focused(); if (!p) return;
   const s = p.sess, w = p.win;
   renderSessTabs();
@@ -418,7 +459,7 @@ $('#w-panes').addEventListener('click', (e) => {
   ]);
 });
 // ---------- agent controls: the commands and keys Claude Code and Codex understand ----------
-export const agentOf = (pane) => /^(claude|codex)$/.test(pane?.cmd) ? pane.cmd : /\b(claude|codex)\b/.exec(pane?.running ? pane.preset || '' : '')?.[1] || null;
+export const agentOf = (pane) => pane?.agent ? (/^(claude|codex)$/.test(pane.agent.agent) ? pane.agent.agent : null) : /^(claude|codex)$/.test(pane?.cmd) ? pane.cmd : /\b(claude|codex)\b/.exec(pane?.running ? pane.preset || '' : '')?.[1] || null;
 const slash = (t, cmd) => async () => { await act(`${t}/keys`, { text: cmd }); await new Promise((r) => setTimeout(r, 120)); await act(`${t}/keys`, { keys: ['Enter'] }); };
 const keys = (t, ...k) => async () => { await act(`${t}/keys`, { keys: k }); setTimeout(refresh, 400); };
 $('#w-agent').addEventListener('click', (e) => {

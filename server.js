@@ -18,7 +18,7 @@ import * as rs from './lib/restore.js';
 import * as logs from './lib/logs.js';
 const { setMaster } = auth;
 import { parseCron, nextRun } from './lib/cron.js';
-import { startWatcher, prompts, status, lastRuns, notify, answerToken } from './lib/watch.js';
+import { startWatcher, prompts, status, agentState, lastRuns, notify, answerToken } from './lib/watch.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 7681);
@@ -45,7 +45,8 @@ async function listSessions() {
   const repos = new Map(await Promise.all(cwds.map(async (c) => [c, await G.repoOf(c)])));
   return shape(rows, (r) => {
     const g = repos.get(r.pane_current_path);
-    return { prompt: prompts.get(r.pane_id) || null, status: status.get(r.pane_id) || null, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
+        const agent = agentState.get(r.pane_id) || null;
+    return { ...(agent && { cmd: agent.agent, running: true }), prompt: prompts.get(r.pane_id) || null, status: status.get(r.pane_id) || null, agent, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
   }).list;
 }
 
@@ -217,6 +218,13 @@ const routes = [
   }],
   ['POST', r('/api/alerts/test'), async () => {
     if (!(await notify('tmuxlab test', `Alerts from ${os.hostname()} work.`, { tags: 'bell' }))) throw httpErr(400, 'set an ntfy topic URL first');
+    return {};
+  }],
+  // the tmuxlab command: an agent tells you something (phone alert)
+  ['POST', r('/api/notify'), async (_, b) => {
+    const title = String(b?.title || '').slice(0, 120), message = String(b?.message || '').slice(0, 2000);
+    if (!title) throw httpErr(400, 'title is required');
+    if (!(await notify(title, message || title, { tags: 'robot' }))) throw httpErr(400, 'set an ntfy topic URL in Settings › Phone alerts first');
     return {};
   }],
   ['GET', r('/api/schedules/status'), () => Object.fromEntries(loadConf('schedules').map((s) => {

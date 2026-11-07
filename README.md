@@ -1,6 +1,10 @@
 # tmuxlab
 
-Your tmux sessions from a browser or the Android app: start shells, Claude, Codex, tests or dev servers, close the page, and they keep running inside tmux. One web app in `public/` is served by the server and also ships, unchanged, inside the Android APK (Capacitor).
+Run Claude Code, Codex and other coding agents in parallel on your machine, and drive them from a browser or your phone. Each agent runs in its own tmux session, so it keeps working when you close the page. The sessions list shows which agents are working, idle or waiting for you, and you can answer their prompts from there, or from a phone notification.
+
+Terminal tools such as [herdr](https://github.com/herdrdev/herdr) do this inside your terminal. tmuxlab does it from a web page and an Android app, so you can check on your agents, answer them and start new ones when you're away from the machine.
+
+Shells, tests and dev servers work the same way. One web app in `public/` is served by the server and also ships, unchanged, inside the Android APK (Capacitor).
 
 It gives whoever holds a key a shell as your user, so read [Security](#security) before you expose it to anything.
 
@@ -17,6 +21,22 @@ It gives whoever holds a key a shell as your user, so read [Security](#security)
     npm start                      # prints links with your token, e.g. http://192.168.1.20:7681/#token=…
 
 Open a printed link on any device. That server token only signs devices in: each device then gets its own key, listed in Settings › Devices, where you can remove one without signing out the rest. The server token lives in `~/.config/tmuxlab/token`; Settings › Devices › New server token replaces it (signed-in devices stay signed in).
+
+### Or in a container
+
+The image runs its own tmux, so sessions live in the container, not on your machine. Your home folder (`/home/dev`: config, keys, repos, and tools you install) is on a volume; tmux sessions end when the container stops, and the sessions list offers to restore them when it starts again.
+
+    docker run -d --name tmuxlab -p 7681:7681 -v tmuxlab-home:/home/dev ghcr.io/wirin-prod/tmuxlab
+    docker logs tmuxlab              # the sign-in links (use your machine's address, not the container's)
+
+Or with Compose: download [`compose.yaml`](compose.yaml), then `docker compose up -d` and `docker compose logs tmuxlab`.
+
+On Kubernetes, with Helm:
+
+    helm install tmuxlab oci://ghcr.io/wirin-prod/charts/tmuxlab
+    # then follow the printed notes: port-forward, and read the token from the pod
+
+See [`charts/tmuxlab/values.yaml`](charts/tmuxlab/values.yaml) for the token, ingress and storage settings. It runs one pod, never more. The image has git, ssh, curl and Node; add your agents inside a session, e.g. `npm i -g @anthropic-ai/claude-code` (it installs into the home volume, so it survives upgrades), or build your own image `FROM ghcr.io/wirin-prod/tmuxlab`.
 
 Keep it running at boot:
 
@@ -44,6 +64,8 @@ Install it, then paste a startup link (or address and token) on the connect scre
 - **Where each session runs**: every card and the terminal show the program running (claude, codex, …), the git repository, the worktree if it isn't the main checkout, and the folder. Ctrl+K searches these too, so typing a repo or worktree name finds its sessions. Sessions started without a name are named after their folder (`tmuxlab`, `tmuxlab-2`) instead of a number.
 - **Approve prompts**: when Claude Code, Codex or a similar agent shows an arrow-key menu ("Do you want to proceed? ❯ 1. Yes"), the card and the terminal show its options as buttons. Tapping one answers it. "Needs you" filters to sessions that are waiting.
 - **Phone alerts**: Settings › Phone alerts. Tap New topic, subscribe to that topic in the [ntfy](https://ntfy.sh) app, and the server pushes when an agent asks a question, goes quiet after working, or a launched command exits. This works with tmuxlab closed. It can also warn when the machine's disk or memory is over 90% full or its CPU has been busy for 5 minutes (once per episode). ntfy.sh topics are public to anyone who knows the name, so keep the random one, or point it at your own ntfy server. Question alerts carry the agent's options as buttons (up to three): tapping one answers it without opening tmuxlab. Each button is a one-time link that expires after 15 minutes and can only pick an option of that question; it goes to the address of the device you last saved alert settings from, so it works while the phone can reach the machine.
+- **Agents**: tmuxlab recognises the common coding agents (Claude Code, Codex, Gemini, Aider, OpenCode, Cursor, Copilot, Amp, Qwen, Goose and more; add your own in `settings.json` › `agents`) and marks each one **working**, **blocked** (waiting for an answer), **done** (finished since you last looked) or **idle**. The Agents button in the terminal opens a list of every agent across all sessions, the ones that need you first; tap one to jump to it. On wide screens it stays open as a sidebar.
+- **Agents working together**: the `tmuxlab` command lets an agent (or you) use the other terminals: `tmuxlab agents` lists them with their state, `tmuxlab split -- npm run dev` opens a pane beside you, `tmuxlab new review -- claude` starts a helper agent, `tmuxlab send %4 "review src/auth"` prompts it, `tmuxlab wait %4` waits until it's done (or exits 2 if it's blocked on a question), `tmuxlab read %4` shows its output and `tmuxlab notify` sends a phone alert. Run `npm link` once to put `tmuxlab` on your PATH (the container image already has it), then `tmuxlab skill --install` teaches Claude Code to use it. It talks to the local server with the token in `~/.config/tmuxlab/token`, so it works for the user who runs tmuxlab.
 - **Projects**: folders for sessions. **New project** (folder icon) adds one with an optional default folder; each project is a collapsible section on the wall with its own **+ Session** button. Move a session with ⋯ › Move to project, or drag its card onto a project heading on desktop. The project is stored on the tmux session (`@tl_project`), so every device sees the same grouping and it survives renames. Deleting a project keeps its sessions running under No project.
 - **New session**: pick a launcher or a stack and a folder. In a git repo, "Work on a new branch in its own folder" creates a git worktree (`<repo>.worktrees/<branch>`), so several agents can work on the same repo without colliding.
 - **Stacks**: a stack opens several windows and splits at once, e.g. dev server + tests + claude, or claude and codex side by side. Edit them in Settings › Stacks.

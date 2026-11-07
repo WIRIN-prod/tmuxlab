@@ -1,0 +1,16 @@
+tmuxlab is starting. Reach it with:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "tmuxlab.fullname" . }} 7681:{{ .Values.service.port }}
+
+{{- if or .Values.token .Values.existingSecret }}
+then open http://localhost:7681/#token=<your token>
+{{- else }}
+The server token was generated into the volume. Show it with:
+
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "tmuxlab.fullname" . }} -- cat /home/dev/.config/tmuxlab/token
+
+then open http://localhost:7681/#token=<that token>
+{{- end }}
+
+Anyone with the token gets a shell in this pod. Remove devices you no longer use in Settings › Devices.
+The volume is kept when you uninstall; delete the PVC yourself to remove it.

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmuxlab.fullname" . }}
+  labels: {{- include "tmuxlab.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "tmuxlab.selector" . | nindent 4 }}
+  ports: [{ name: http, port: {{ .Values.service.port }}, targetPort: http }]

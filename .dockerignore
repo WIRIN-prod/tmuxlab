@@ -1,0 +1,8 @@
+node_modules
+public/vendor
+dist
+android
+.env
+*.jks
+.git
+test

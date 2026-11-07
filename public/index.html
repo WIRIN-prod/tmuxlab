@@ -141,6 +141,7 @@
   <header class="stabbar">
     <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions"><svg class="ico" aria-hidden="true"><use href="#i-left"/></svg></button>
     <nav class="stabs" id="t-stabs" aria-label="Open sessions"></nav>
+    <button class="btn ghost agents-btn" id="btn-agents" aria-controls="t-agents" aria-expanded="false" title="Every agent and what it's doing"><svg class="ico" aria-hidden="true"><use href="#i-layers"/></svg><span class="lbl">Agents</span><span class="badge" id="t-agents-n" hidden></span></button>
     <button class="btn ghost icon" id="btn-opensess" aria-label="Open another session" title="Open another session" aria-haspopup="menu"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
     <span class="conn" id="t-conn" role="status"><span class="sr-only" id="t-conn-l">Connecting</span></span>
   </header>
@@ -172,7 +173,10 @@
   </div>
   <div class="pchips" id="t-panes" hidden></div>
   <div class="ask bar" id="t-ask" hidden></div>
-  <div class="terms" id="terms" data-n="1"></div>
+  <div class="tmain">
+    <aside class="agents" id="t-agents" aria-label="Agents" hidden></aside>
+    <div class="terms" id="terms" data-n="1"></div>
+  </div>
   <div class="keys" id="keys" role="toolbar" aria-label="Extra keys"></div>
 </section>
 

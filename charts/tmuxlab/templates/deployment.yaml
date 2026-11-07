@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmuxlab.fullname" . }}
+  labels: {{- include "tmuxlab.labels" . | nindent 4 }}
+spec:
+  replicas: 1                # one tmux server; never scale this up
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "tmuxlab.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "tmuxlab.selector" . | nindent 8 }}
+    spec:
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true }
+      containers:
+        - name: tmuxlab
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: TZ, value: {{ .Values.timezone | quote }} }
+            {{- if or .Values.token .Values.existingSecret }}
+            - name: TMUXLAB_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.existingSecret | default (include "tmuxlab.fullname" .) }}, key: token }
+            {{- end }}
+          ports: [{ name: http, containerPort: 7681 }]
+          readinessProbe: { tcpSocket: { port: http }, periodSeconds: 10 }
+          livenessProbe: { tcpSocket: { port: http }, initialDelaySeconds: 10, periodSeconds: 30 }
+          volumeMounts: [{ name: home, mountPath: /home/dev }]
+          {{- with .Values.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: home
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim: { claimName: {{ .Values.persistence.existingClaim | default (include "tmuxlab.fullname" .) }} }
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

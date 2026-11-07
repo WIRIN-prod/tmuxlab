@@ -48,3 +48,20 @@ test('the app knows its own version, so it can tell when the machine has a newer
   const core = fs.readFileSync(new URL('../public/js/core.js', import.meta.url), 'utf8');
   assert.equal(core.match(/export const VERSION = '([\d.]+)'/)?.[1], pkg.version);
 });
+
+test('the Helm chart ships the same version as the app', async () => {
+  const fs = await import('node:fs');
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
+  const chart = fs.readFileSync(new URL('../charts/tmuxlab/Chart.yaml', import.meta.url), 'utf8');
+  assert.equal(chart.match(/^appVersion: "([\d.]+)"/m)?.[1], pkg.version);
+});
+
+test('the tmuxlab command refuses pane names that would make tmux pick the current pane', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const cli = new URL('../bin/tmuxlab.mjs', import.meta.url).pathname;
+  for (const t of ['', '--lines', '-t']) {
+    const r = spawnSync(process.execPath, [cli, 'read', t, '--lines', '1'], { encoding: 'utf8', env: { ...process.env, TMUXLAB_SOCKET: 'tl-none' } });
+    assert.equal(r.status, 1, `read "${t}" should fail`);
+    assert.equal(r.stdout, '');
+  }
+});

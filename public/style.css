@@ -569,3 +569,29 @@ code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; b
 .lg mark, .lg-log mark { background: color-mix(in srgb, var(--attn) 40%, transparent); color: inherit; border-radius: 2px; }
 #lg-form { display: flex; gap: 8px; align-items: center; }
 #lg-form input { flex: 1; min-width: 0; }
+
+/* agents panel: beside the terminals on wide screens, a drawer over them on phones */
+.tmain { flex: 1; min-height: 0; display: flex; position: relative; }
+.tmain .terms { flex: 1; min-width: 0; }
+.agents { width: 260px; flex: none; overflow-y: auto; background: var(--surface); border-right: 1px solid var(--line); padding: 8px 6px; }
+.agents h2 { margin: 2px 8px 6px; font-weight: 500; }
+.agents ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ag { width: 100%; display: grid; grid-template-columns: 8px 1fr; gap: 2px 8px; align-items: center; text-align: left; padding: 8px; min-height: var(--tap);
+  border: 0; border-radius: var(--r-md); background: none; color: var(--text); font: inherit; cursor: pointer; }
+.ag:hover { background: var(--surface-2); }
+.ag[aria-current="true"] { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--primary); }
+.ag .ag-t, .ag .ag-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag .ag-st, .ag .ag-l { grid-column: 2; font-size: 12px; color: var(--muted); }
+.ag .ag-l { font-family: var(--mono); }
+.ag-working .dot { background: var(--live); animation: pulse 2s ease-in-out infinite; }
+.ag-blocked .dot { background: var(--attn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--attn) 25%, transparent); }
+.ag-blocked .ag-st { color: var(--attn); }
+.ag-done .dot { background: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent); }
+.ag-done .ag-st { color: var(--primary); }
+.agents-btn { gap: 6px; }
+.agents-btn .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--attn); color: var(--on-attn); font-size: 11px; font-weight: 600; display: inline-grid; place-items: center; }
+@media (max-width: 1099px) {
+  .agents { position: absolute; inset: 0 auto 0 0; width: min(320px, 86vw); z-index: var(--z-overlay); box-shadow: var(--shadow-2); }
+}
+@media (max-width: 640px) { .agents-btn .lbl { display: none; } }
+.viewer .agents-btn, .viewer .agents { display: none !important; }
