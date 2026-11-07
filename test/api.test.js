@@ -33,7 +33,7 @@ before(async () => {
 after(async () => {
   srv.kill(); await new Promise((r) => srv.exitCode !== null ? r() : srv.once('exit', r)); // the server may still be writing
   try { execFileSync('tmux', ['-L', SOCK, 'kill-server'], { stdio: 'ignore' }); } catch {}
-  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); } catch {} // dying shells may still write their history
 });
 
 test('rejects missing or wrong token', async () => {

@@ -43,7 +43,7 @@ before(async () => {
 after(async () => {
   srv.kill(); await new Promise((r) => srv.exitCode !== null ? r() : srv.once('exit', r)); // the server may still be writing
   try { T('kill-server'); } catch {}
-  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); } catch {} // dying shells may still write their history
   fs.rmSync(repo + '.worktrees', { recursive: true, force: true, maxRetries: 5 });
 });
 
@@ -55,7 +55,7 @@ test('each terminal gets its own view: switching windows does not move other vie
     ws.on('message', (d) => { const m = d.toString(); if (m.startsWith('\x00TL')) res({ ws, view: JSON.parse(m.slice(3)).name }); });
   });
   const a = await open(0), b = await open(1);
-  const s = await until(async () => { const x = await find('v'); return Object.keys(x.views).length === 2 && x; });
+  const s = await until(async () => { const x = await find('v'); return Object.keys(x.views).length === 2 && x.attached === 2 && x; }); // the view exists a moment before its client attaches
   assert.equal(s.views[a.view], 0);
   assert.equal(s.views[b.view], 1);
   assert.equal(s.attached, 2);
