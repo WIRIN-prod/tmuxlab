@@ -156,6 +156,8 @@
     <button class="btn sm ghost branch" id="w-changes" title="Changes, commit and pull request" hidden></button>
     <button class="btn sm ghost" id="w-panes" aria-haspopup="menu">Panes</button>
     <button class="btn sm ghost" id="w-snip" aria-haspopup="menu" title="Run a saved command">Snippets</button>
+    <button class="btn sm ghost" id="attach" title="Upload a file or photo and type its path">Attach</button><input type="file" id="attach-file" multiple hidden>
+    <button class="btn sm ghost" id="mic" aria-pressed="false" title="Dictate into the terminal" hidden>Dictate</button>
     <button class="btn sm ghost" id="w-find" title="Search and copy output">Find</button>
     <button class="btn sm ghost" id="w-scroll" title="Scroll back (tmux copy mode)">History</button>
     <span class="sep" aria-hidden="true"></span>
@@ -168,13 +170,6 @@
   <div class="ask bar" id="t-ask" hidden></div>
   <div class="terms" id="terms" data-n="1"></div>
   <div class="keys" id="keys" role="toolbar" aria-label="Extra keys"></div>
-  <form class="compose" id="compose">
-    <button type="button" class="btn ghost icon" id="attach" aria-label="Attach a file or photo" title="Attach a file or photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/></svg></button>
-    <input type="file" id="attach-file" multiple hidden>
-    <textarea id="compose-text" rows="1" placeholder="Type or paste" title="Enter sends, Shift+Enter adds a line" autocapitalize="off" spellcheck="false" aria-label="Send text to terminal"></textarea>
-    <button type="button" class="btn ghost icon" id="mic" aria-label="Dictate" aria-pressed="false" title="Dictate" hidden><svg class="ico" aria-hidden="true"><use href="#i-mic"/></svg></button>
-    <button class="btn primary" aria-label="Send">Send</button>
-  </form>
 </section>
 
 <!-- new session / window -->

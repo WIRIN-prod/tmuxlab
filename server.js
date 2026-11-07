@@ -244,7 +244,7 @@ const routes = [
     return { path: dir, parent: path.dirname(dir), dirs, git: fs.existsSync(path.join(dir, '.git')), home: os.homedir() };
   }],
   ['GET', r('/api/info'), async (_, __, ___, who) => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2,
-    addrs: lanAddrs(), role: who.role, session: who.session, self: who.id, auth: who.master ? 'server' : 'device' })],
+    addrs: lanAddrs(), apk: apkVersion(), role: who.role, session: who.session, self: who.id, auth: who.master ? 'server' : 'device' })],
   // devices: each gets its own token (the server token only signs devices in); share links are view-only devices
   ['GET', r('/api/devices'), (_, __, ___, who) => ({ self: who.id, devices: auth.list() })],
   ['POST', r('/api/devices'), (_, b) => auth.issue({ name: b.name })],
@@ -302,7 +302,18 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
   '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.json': 'application/json' };
 const PUB = path.join(ROOT, 'public');
 
+// the newest app build, for phones to update from (scripts/build-apk.sh writes both files)
+const APK = path.join(ROOT, 'dist', 'tmuxlab.apk');
+const apkVersion = () => { try { return fs.readFileSync(APK.replace(/\.apk$/, '.version'), 'utf8').trim(); } catch { return null; } };
+
 function serveStatic(url, res) {
+  if (url === '/tmuxlab.apk') { // public, like the page itself: it holds no token
+    return fs.stat(APK, (err, st) => {
+      if (err) return send(res, 404, { error: 'no app build on this machine' });
+      res.writeHead(200, { 'content-type': 'application/vnd.android.package-archive', 'content-length': st.size, 'content-disposition': 'attachment; filename="tmuxlab.apk"' });
+      fs.createReadStream(APK).pipe(res);
+    });
+  }
   const file = path.join(PUB, url === '/' ? 'index.html' : url);
   if (!file.startsWith(PUB + path.sep)) return send(res, 404, { error: 'not found' });
   fs.readFile(file, (err, data) => {

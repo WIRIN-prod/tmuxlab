@@ -16,4 +16,5 @@ docker run --rm -v "$PWD:/app" -v tmuxlab-gradle:/root/.gradle -e KEYSTORE_PASSW
   chown -R '"$(id -u):$(id -g)"' /app/android'
 mkdir -p dist
 cp android/app/build/outputs/apk/release/app-release.apk dist/tmuxlab.apk
+node -p "require('./package.json').version" > dist/tmuxlab.version # phones on an older version offer this APK
 ls -l dist/tmuxlab.apk

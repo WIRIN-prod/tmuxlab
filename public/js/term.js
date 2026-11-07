@@ -594,8 +594,8 @@ function renderKeys() {
     if (seq === 'ctrl' || seq === 'alt') { T.mods[seq] = !T.mods[seq]; return renderKeys(); }
     if (seq === 'snip') return snippets(b);
     if (seq === 'paste') {
-      return navigator.clipboard?.readText ? navigator.clipboard.readText().then(paste, () => toast('Long-press the message box and paste there', true))
-        : toast('Long-press the message box and paste there', true);
+      return navigator.clipboard?.readText ? navigator.clipboard.readText().then(paste, () => toast('This app may not read the clipboard', true))
+        : toast('This app may not read the clipboard', true);
     }
     sendInput(applyMods(seq));
     if (repeat) rep = setTimeout(() => { rep = setInterval(() => sendInput(seq), 60); }, 380);
@@ -603,19 +603,7 @@ function renderKeys() {
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('#keys').addEventListener(ev, stop);
 })();
 
-// ---------- message box: reliable typing on phones, pasting prompts, attaching files ----------
-const ct = $('#compose-text');
-function sendCompose() {
-  const v = ct.value;
-  if (v.trim() && !v.includes('\n')) store.set('sent', [v.trim(), ...store.get('sent', []).filter((x) => x !== v.trim())].slice(0, 12));
-  // multi-line text goes as a bracketed paste so agents treat it as one prompt
-  paste(v);
-  setTimeout(() => sendInput('\r'), v.includes('\n') ? 60 : 0);
-  ct.value = ''; ct.style.height = '';
-}
-$('#compose').addEventListener('submit', (e) => { e.preventDefault(); sendCompose(); });
-ct.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendCompose(); } });
-ct.addEventListener('input', () => { ct.style.height = ''; ct.style.height = Math.min(ct.scrollHeight, innerHeight * 0.3) + 'px'; });
+// ---------- attach: upload a file and type its path ----------
 $('#attach').addEventListener('click', () => $('#attach-file').click());
 $('#attach-file').addEventListener('change', async (e) => {
   const c = cur(); if (!c) return;
@@ -623,13 +611,11 @@ $('#attach-file').addEventListener('change', async (e) => {
     toast(`Uploading ${f.name}…`);
     try {
       const r = await api(`/api/upload?dir=${encodeURIComponent(c.ap.cwd)}&name=${encodeURIComponent(f.name)}`, { method: 'POST', raw: f, timeout: 120000 });
-      ct.value = (ct.value ? ct.value.replace(/\s*$/, ' ') : '') + r.path + ' ';
-      ct.dispatchEvent(new Event('input'));
+      paste(r.path + ' ');
       toast(`Attached ${f.name}`);
     } catch (err) { toast(`${f.name}: ${err.message}`, true); }
   }
   e.target.value = '';
-  ct.focus();
 });
 renderKeys();
 
@@ -640,9 +626,8 @@ let rec = null;
 $('#mic').hidden = !Speech || !!window.Capacitor?.isNativePlatform?.(); // the WebView has the API but no recogniser; the keyboard's mic works there
 $('#mic').addEventListener('click', () => {
   if (rec) return rec.stop();
-  const ta = $('#compose-text'), before = ta.value ? ta.value.replace(/\s*$/, ' ') : '';
-  rec = new Speech(); rec.lang = navigator.language; rec.interimResults = true; rec.continuous = true;
-  rec.onresult = (e) => { ta.value = before + [...e.results].map((r) => r[0].transcript).join(''); ta.dispatchEvent(new Event('input')); };
+  rec = new Speech(); rec.lang = navigator.language; rec.continuous = true;
+  rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) paste(e.results[i][0].transcript + ' '); };
   rec.onerror = (e) => { if (e.error !== 'aborted' && e.error !== 'no-speech') toast(e.error === 'not-allowed' ? 'Microphone access is blocked for this page.' : `Dictation stopped: ${e.error}`, true); };
   rec.onend = () => { rec = null; $('#mic').setAttribute('aria-pressed', 'false'); };
   rec.start(); $('#mic').setAttribute('aria-pressed', 'true');

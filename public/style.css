@@ -103,7 +103,7 @@ select { appearance: auto; }
 .secret .btn { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
 fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 6px; }
 legend { font-size: 14px; font-weight: 500; padding: 0; margin-bottom: 6px; }
-@media (pointer: coarse), (max-width: 640px) { input, select, .compose textarea, .palette input { font-size: 16px; } }
+@media (pointer: coarse), (max-width: 640px) { input, select, .palette input { font-size: 16px; } }
 
 /* login */
 #login { min-height: 100dvh; display: grid; place-items: center; padding: calc(var(--safe-t) + 24px) calc(var(--safe-r) + 16px) calc(var(--safe-b) + 24px) calc(var(--safe-l) + 16px); }
@@ -236,9 +236,6 @@ legend { font-size: 14px; font-weight: 500; padding: 0; margin-bottom: 6px; }
 .keys button:active { background: var(--surface-3); }
 .keys button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .keys .sep { width: 1px; background: var(--line); margin: 8px 2px; flex: none; }
-.compose { display: flex; gap: 6px; padding: 6px; background: var(--surface); align-items: flex-end; }
-.compose textarea { flex: 1; min-height: 44px; max-height: 30vh; resize: none; font-size: 15px; padding: 10px 12px; }
-.compose .btn { min-height: 44px; }
 @media (hover: hover) and (pointer: fine) { .keys { display: none; } }
 /* short landscape phones: keep the terminal tall */
 @media (max-height: 480px) and (orientation: landscape) { .wbar .wcmd, .pchips { display: none; } .termbar { min-height: 0; } }
@@ -536,7 +533,7 @@ code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; b
 
 /* watch links: view only */
 .viewer #btn-back, .viewer #btn-opensess, .viewer .stab-x, .viewer #btn-addwin, .viewer #btn-split, .viewer .wacts,
-.viewer #t-ask, .viewer #keys, .viewer #compose { display: none !important; }
+.viewer #t-ask, .viewer #keys { display: none !important; }
 .viewer .stabbar::after { content: 'Watching · view only'; margin-left: auto; padding: 0 12px; color: var(--muted); font-size: 13px; white-space: nowrap; }
 
 /* restore after reboot */

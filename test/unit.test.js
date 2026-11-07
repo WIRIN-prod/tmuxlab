@@ -41,3 +41,10 @@ test('cron parsing and matching', () => {
   assert.equal(nextRun(parseCron('0 0 1 1 *'), new Date(2026, 5, 1)).getFullYear(), 2027);
   for (const bad of ['* * *', '60 * * * *', '5-1 * * * *', 'x * * * *']) assert.throws(() => parseCron(bad));
 });
+
+test('the app knows its own version, so it can tell when the machine has a newer APK', async () => {
+  const fs = await import('node:fs');
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
+  const core = fs.readFileSync(new URL('../public/js/core.js', import.meta.url), 'utf8');
+  assert.equal(core.match(/export const VERSION = '([\d.]+)'/)?.[1], pkg.version);
+});

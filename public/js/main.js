@@ -1,5 +1,5 @@
 // Boot: connect to the current machine, then poll.
-import { $, esc, S, api, act, toast, cfg, saveMachines, show, isApp, Unauthorized, busy } from './core.js';
+import { $, esc, S, api, act, toast, cfg, saveMachines, show, isApp, Unauthorized, busy, VERSION } from './core.js';
 import { refresh, refreshPreviews, refreshStats } from './wall.js';
 import { closeTerm, openTerm } from './term.js';
 import './sheets.js';
@@ -107,6 +107,13 @@ async function adoptDevice(info) {
   }
 }
 
+// the app: when the machine has a newer APK, offer it (Android asks before installing)
+const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+function offerUpdate(info) {
+  if (!isApp || !info.apk || !newer(info.apk, VERSION)) return;
+  toast(`tmuxlab ${info.apk} is ready`, false, { action: 'Update', run: () => window.open(cfg().base + '/tmuxlab.apk', '_blank') });
+}
+
 // after a reboot: the sessions that were open before, one tap away
 async function offerRestore() {
   const o = await api('/api/restore').catch(() => null); // older servers: nothing to offer
@@ -149,7 +156,7 @@ export async function start() {
     return;
   }
   show('wall');
-  offerRestore();
+  offerRestore(); offerUpdate(S.info);
   await refresh();
   refreshPreviews(); refreshStats();
   pollers = [setInterval(() => !document.hidden && refresh(), 2000), setInterval(refreshPreviews, 3000), setInterval(refreshStats, 3000)];
