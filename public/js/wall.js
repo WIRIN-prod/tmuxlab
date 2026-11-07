@@ -1,7 +1,7 @@
 // The session wall: live previews, status, approvals, machine stats.
-import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy, whereHtml, whereText, presetIcon, onBack } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWin, activePane, findSess, menu, presetItems, cfg, saveMachines, store, touch, ask, icon, NAME_RULE, busy, whereHtml, whereText, presetIcon, onBack, openPort } from './core.js';
 import { openTerm, renderTermBar } from './term.js';
-import { openNew, openChanges, openPalette, openSettings, openSchedules } from './sheets.js';
+import { openNew, openChanges, openPalette, openSettings, openSchedules, openAgent } from './sheets.js';
 import { start, addMachine } from './main.js';
 
 const seenPrompts = new Set();
@@ -176,7 +176,7 @@ function rowFor(s) {
   $('.srow-m', row).setAttribute('aria-label', `Open ${s.name}`);
   $('.srow-m', row).innerHTML = `<span class="tile st-${st}" title="${st === 'ask' ? 'Waiting for you' : st === 'run' ? 'Running' : 'Idle'}">${icon(rp ? presetIcon({ cmd: rp.cmd }) : 'terminal')}</span>
     <span class="srow-t"><span class="l1"><h3>${esc(s.name)}</h3>${s.windows.length > 1 ? `<span class="cnt">${s.windows.length} windows</span>` : ''}${s.attached ? `<span class="cnt att">${s.attached} viewing</span>` : ''}</span>
-    <span class="where">${whereHtml(aw)}</span></span>
+    <span class="where">${whereHtml(aw)}</span>${rp?.status?.last ? `<span class="srow-s">${rp.status.mode ? `<span class="mode">${esc(rp.status.mode)}</span>` : ''}${esc(rp.status.last)}</span>` : ''}</span>
     <span class="srow-r"><span class="when">${ago(s.activity)}</span><span class="use">${usage ? `${Math.round(usage.cpu)}% · ${bytes(usage.rss)}` : ''}</span></span>`;
   $('.asks', row).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
   return row;
@@ -201,6 +201,10 @@ $('#grid').addEventListener('click', async (e) => {
     ...(() => { const rp = aw.panes.find((x) => x.running && x.active) || aw.panes.find((x) => x.running);
       return rp ? [{ label: `Stop ${rp.cmd}`, icon: 'x', run: async () => { await act(`${W(s.name, `${aw.index}.${rp.index}`)}/stop`); toast(`Sent stop to ${rp.cmd}`); setTimeout(refresh, 600); } }]
         : aw.preset ? [{ label: `Start ${aw.preset.split(' ')[0]}`, icon: 'play', run: async () => { await act(`${W(s.name, aw.index)}/start`); toast(`Started ${aw.preset}`); setTimeout(refresh, 600); } }] : []; })(),
+    ...(aw.panes.some((x) => x.running) ? [] : [
+      { label: 'Start Claude Code…', icon: 'spark', run: () => openAgent({ kind: 'claude', s: s.name, t: W(s.name, aw.index), cwd: activePane(aw).cwd, where: 'pane' }) },
+      { label: 'Start Codex…', icon: 'target', run: () => openAgent({ kind: 'codex', s: s.name, t: W(s.name, aw.index), cwd: activePane(aw).cwd, where: 'pane' }) }]),
+    ...(S.stats?.sessions[s.name]?.ports || []).map((x) => ({ label: `Open :${x.port}`, icon: 'globe', run: () => openPort(x.port) })),
     { label: 'New window', icon: 'plus', run: () => menu(e.target.closest('button'), presetItems(async (p) => {
       await act(`/api/sessions/${encodeURIComponent(s.name)}/windows`, { preset: p.id }); toast(`Opened ${p.label}`); refresh();
     })) },

@@ -4,6 +4,7 @@ mkdirSync('public/vendor', { recursive: true });
 for (const [src, dst] of [
   ['@xterm/xterm/lib/xterm.js', 'xterm.js'], ['@xterm/xterm/css/xterm.css', 'xterm.css'],
   ['@xterm/addon-fit/lib/addon-fit.js', 'addon-fit.js'], ['@xterm/addon-web-links/lib/addon-web-links.js', 'addon-web-links.js'],
+  ['qrcode-generator/dist/qrcode.mjs', 'qrcode.js'],
 ]) cpSync(`node_modules/${src}`, `public/vendor/${dst}`);
 let css = '';
 for (const [pkg, fam, weights] of [['ibm-plex-sans', 'IBM Plex Sans', [400, 500, 600]], ['jetbrains-mono', 'JetBrains Mono', [400, 600]]]) {

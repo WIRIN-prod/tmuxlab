@@ -19,7 +19,10 @@
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
-    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0014 0M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></g><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 19h2M19 14h2" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></g></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
     <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
@@ -63,6 +66,7 @@
       <span class="help" id="login-token-h">On the server: <code>cat ~/.config/tmuxlab/token</code></span></label>
     <p id="login-err" class="err" role="alert"></p>
     <button class="btn primary">Connect</button>
+    <button type="button" class="btn" id="login-scan" hidden><svg class="ico" aria-hidden="true"><use href="#i-qr"/></svg>Scan QR code</button>
     <div class="saved" id="login-saved" hidden></div>
   </form>
 </section>
@@ -122,19 +126,24 @@
 
 <!-- terminal -->
 <section id="term" class="view" hidden>
-  <header class="termbar">
+  <header class="stabbar">
     <button class="btn ghost icon" id="btn-back" aria-label="Back to sessions"><svg class="ico" aria-hidden="true"><use href="#i-left"/></svg></button>
-    <button class="sname" id="t-name" title="Rename session"></button>
+    <nav class="stabs" id="t-stabs" aria-label="Open sessions"></nav>
+    <button class="btn ghost icon" id="btn-opensess" aria-label="Open another session" title="Open another session" aria-haspopup="menu"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
+    <span class="conn" id="t-conn" role="status"><span class="sr-only" id="t-conn-l">Connecting</span></span>
+  </header>
+  <header class="termbar">
     <nav class="tabs" id="t-tabs" aria-label="Windows"></nav>
     <button class="btn ghost icon" id="btn-addwin" aria-label="New window" title="New window"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
     <button class="btn ghost icon" id="btn-split" aria-label="Show another window beside this one" title="Split view"><svg class="ico" aria-hidden="true"><use href="#i-columns"/></svg></button>
-    <span class="conn" id="t-conn" role="status"><span class="sr-only" id="t-conn-l">Connecting</span></span>
   </header>
   <div class="wbar" id="t-wbar">
     <div class="where wcmd" id="t-where" aria-label="Where this window runs"></div>
     <div class="wacts">
     <button class="btn sm" id="w-toggle"></button>
     <button class="btn sm ghost" id="w-restart" title="Interrupt and rerun">Restart</button>
+    <button class="btn sm ghost" id="w-agent" aria-haspopup="menu" hidden></button>
+    <button class="btn sm ghost" id="w-ports" aria-haspopup="menu" title="Open a dev server from this session" hidden></button>
     <span class="sep" aria-hidden="true"></span>
     <button class="btn sm ghost branch" id="w-changes" title="Changes, commit and pull request" hidden></button>
     <button class="btn sm ghost" id="w-panes" aria-haspopup="menu">Panes</button>
@@ -155,6 +164,7 @@
     <button type="button" class="btn ghost icon" id="attach" aria-label="Attach a file or photo" title="Attach a file or photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9"/></svg></button>
     <input type="file" id="attach-file" multiple hidden>
     <textarea id="compose-text" rows="1" placeholder="Type or paste" title="Enter sends, Shift+Enter adds a line" autocapitalize="off" spellcheck="false" aria-label="Send text to terminal"></textarea>
+    <button type="button" class="btn ghost icon" id="mic" aria-label="Dictate" aria-pressed="false" title="Dictate" hidden><svg class="ico" aria-hidden="true"><use href="#i-mic"/></svg></button>
     <button class="btn primary" aria-label="Send">Send</button>
   </form>
 </section>
@@ -250,7 +260,7 @@
 <dialog id="dlg-settings" class="sheet wide">
   <form method="dialog" id="settings-form">
     <div class="row"><h2>Settings</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
-    <p class="muted mono" id="set-server"></p>
+    <div class="row wrap"><p class="muted mono" id="set-server"></p><span class="spacer"></span><button type="button" class="btn sm" id="set-pair"><svg class="ico" aria-hidden="true"><use href="#i-qr"/></svg>Pair a phone</button></div>
     <div class="seg" id="set-tabs" role="tablist">
       <button type="button" role="tab" data-tab="alerts">Phone alerts</button>
       <button type="button" role="tab" data-tab="launchers">Launchers</button>
@@ -266,6 +276,7 @@
       <label class="check"><input type="checkbox" id="al-quiet"> An agent goes quiet after working for <input type="number" id="al-secs" min="5" max="3600" class="num-in" aria-label="seconds"> s</label>
       <label class="check"><input type="checkbox" id="al-finished"> A launched command finishes</label>
       <label>Programs that count as agents<input id="al-agents" spellcheck="false" autocapitalize="off"></label>
+      <p class="muted small" id="al-actions">When an agent asks a question, the alert has buttons that answer it. They work while your phone can reach this machine.</p>
       <div><button type="button" class="btn sm" id="al-test">Send test alert</button></div>
     </div>
     <div data-pane="launchers" class="pane" hidden>
@@ -294,6 +305,47 @@
       <button type="button" class="btn primary" id="set-save">Save settings</button>
     </div>
   </form>
+</dialog>
+
+<!-- start or resume Claude Code / Codex -->
+<dialog id="dlg-agent" class="sheet" aria-labelledby="ag-title">
+  <form method="dialog" id="agent-form">
+    <div class="row"><h2 id="ag-title">Start an agent</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <div class="seg" id="ag-kind" role="tablist" aria-label="Agent">
+      <button type="button" role="tab" data-k="claude">Claude Code</button>
+      <button type="button" role="tab" data-k="codex">Codex</button>
+    </div>
+    <fieldset><legend>Conversation</legend><div class="convs" id="ag-convs" role="radiogroup"></div></fieldset>
+    <div class="grid2" id="ag-opts"></div>
+    <label class="check" id="ag-rc-row"><input type="checkbox" id="ag-rc"> Also control it from the Claude app (Remote Control)</label>
+    <label class="check" id="ag-fork-row" hidden><input type="checkbox" id="ag-fork"> Start a copy instead of continuing it</label>
+    <label class="check" id="ag-search-row" hidden><input type="checkbox" id="ag-search"> Allow web search</label>
+    <div class="cmdprev"><span class="muted small">Runs</span><code id="ag-cmd"></code></div>
+    <div class="seg" id="ag-where" role="radiogroup" aria-label="Where to run it">
+      <button type="button" role="radio" data-w="pane">In this window</button>
+      <button type="button" role="radio" data-w="window">In a new window</button>
+    </div>
+    <p class="err" id="ag-err" role="alert"></p>
+    <div class="row end"><button type="button" class="btn ghost" data-close>Cancel</button><button type="button" class="btn primary" id="ag-go">Start</button></div>
+  </form>
+</dialog>
+
+<!-- pairing: this machine's link as a QR code, and a scanner for the login screen -->
+<dialog id="dlg-pair" class="sheet" aria-labelledby="pair-t">
+  <div class="sheet-in">
+    <div class="row"><h2 id="pair-t">Pair a phone</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <p class="muted">Scan this with the tmuxlab app (Add machine › Scan QR code) or the phone's camera. It contains this machine's token, so whoever scans it gets full access. Don't share screenshots of it.</p>
+    <div class="qr" id="pair-qr"></div>
+    <p class="mono small muted" id="pair-url"></p>
+  </div>
+</dialog>
+<dialog id="dlg-scan" class="sheet" aria-labelledby="scan-t">
+  <div class="sheet-in">
+    <div class="row"><h2 id="scan-t">Scan QR code</h2><span class="spacer"></span><button type="button" class="btn ghost icon" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <p class="muted">On the machine, open Settings › Pair a phone, or run <code>npm run pair</code> in the tmuxlab folder.</p>
+    <video id="scan-v" playsinline muted></video>
+    <p class="err" id="scan-err" role="alert"></p>
+  </div>
 </dialog>
 
 <!-- jump palette -->

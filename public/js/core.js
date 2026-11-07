@@ -210,3 +210,14 @@ export const presetItems = (pick) => S.presets.map((p) => ({ label: p.label, ico
 
 // close buttons in every dialog
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-close]'); if (b) b.closest('dialog').close(); });
+
+// a dev server inside a session, opened through tmuxlab's forwarder (its link carries a key for that port only)
+export async function openPort(port) {
+  const native = !!window.Capacitor?.isNativePlatform?.();
+  const tab = native ? null : window.open('', '_blank'); // open now, while the tap still counts, or the popup is blocked
+  try {
+    const f = await api(`/api/ports/${port}/open`, { method: 'POST' });
+    const u = new URL(cfg().base), url = `${u.protocol}//${u.hostname}:${f.port}/?tl=${encodeURIComponent(f.key)}`;
+    if (tab) tab.location = url; else window.open(url, '_blank');
+  } catch (e) { tab?.close(); toast(e.message, true); }
+}

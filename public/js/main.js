@@ -32,6 +32,27 @@ $('#login-show').addEventListener('click', (e) => {
   $('#login-token').type = on ? 'text' : 'password';
   e.currentTarget.setAttribute('aria-pressed', on); e.currentTarget.setAttribute('aria-label', on ? 'Hide token' : 'Show token');
 });
+$('#login-scan').hidden = !('BarcodeDetector' in window && navigator.mediaDevices?.getUserMedia);
+$('#login-scan').addEventListener('click', async () => {
+  const d = $('#dlg-scan'), v = $('#scan-v');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); }
+  catch { $('#login-err').textContent = 'The camera is not available. Allow camera access for tmuxlab, or paste the link instead.'; return; }
+  d.addEventListener('close', () => stream.getTracks().forEach((t) => t.stop()), { once: true });
+  v.srcObject = stream; d.showModal();
+  try { await v.play(); } catch {}
+  const det = new BarcodeDetector({ formats: ['qr_code'] });
+  while (d.open) {
+    try {
+      const [c] = await det.detect(v);
+      if (c?.rawValue) {
+        if (!/#token=/.test(c.rawValue)) { $('#scan-err').textContent = 'That QR code is not a tmuxlab link.'; }
+        else { d.close(); $('#login-url').value = c.rawValue; $('#login-token').value = ''; return busy($('#login-form .btn.primary'), connect); }
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+});
 $('#login-form').addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter || $('#login-form .btn.primary'), connect); });
 async function connect() {
   let raw = $('#login-url').value.trim(), token = $('#login-token').value.trim();

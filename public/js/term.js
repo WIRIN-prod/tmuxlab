@@ -1,7 +1,7 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
-import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, NAME_RULE, whereHtml, whereText, icon, openPort } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
-import { openNew, openChanges, openFind, pickWindow, openSettings } from './sheets.js';
+import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent } from './sheets.js';
 
 export const THEMES = {
   ink: { background: '#070D18', foreground: '#E2E9F6', cursor: '#5B9BFF', cursorAccent: '#070D18', selectionBackground: '#5B9BFF55',
@@ -54,8 +54,8 @@ class Pane {
     $('.scrollhint .btn', this.el).onclick = async () => { await act(`${W(this.s, this.win.index)}/scroll`, { dir: 'cancel' }); refresh(); };
     touchScroll(this);
   }
-  mount(parent) {
-    parent.append(this.el);
+  mount(parent, before = null) {
+    parent.insertBefore(this.el, before);
     this.term.open($('.xt', this.el));
     new ResizeObserver(() => { if (!$('#term').hidden) try { this.fit.fit(); } catch {} }).observe($('.tbody', this.el));
   }
@@ -137,13 +137,86 @@ function setFocus(i) {
 }
 
 export function openTerm(name, w) {
-  if ($('#term').hidden) afterNav(() => history.pushState({ term: name }, ''));
+  addTab(name);
+  if (!$('#term').hidden && T.panes.length) return switchTo(name, w);
+  afterNav(() => history.pushState({ term: name }, ''));
   for (const p of T.panes) p.dispose();
   T.panes = []; T.focus = 0;
   $('#wall').hidden = true; $('#term').hidden = false;
   addPane(name, w);
   keepAwake(true);
 }
+
+// ---------- session tabs: sessions you have open, one tap apart ----------
+const tabsKey = () => `tabs:${cfg()?.base}`;
+const openTabs = () => store.get(tabsKey(), []);
+const saveTabs = (l) => { store.set(tabsKey(), l); renderSessTabs(); };
+function addTab(name) { const l = openTabs(); if (!l.includes(name)) saveTabs([...l, name].slice(-12)); }
+// the focused view shows another session; the others in a split stay as they are
+function switchTo(name, w) {
+  const old = focused();
+  if (!old) return addPane(name, w);
+  if (old.s === name && w == null) return;
+  const p = new Pane(name, w);
+  p.mount($('#terms'), old.el);
+  old.dispose(); T.panes[T.focus] = p;
+  history.replaceState({ term: name }, '');
+  $('#t-tabs').dataset.sig = '';
+  layout(); renderTermBar(); renderSessTabs();
+  requestAnimationFrame(() => { p.fit.fit(); p.connect(); if (!touch) p.term.focus(); });
+}
+function closeTab(name) {
+  const l = openTabs(), i = l.indexOf(name);
+  saveTabs(l.filter((x) => x !== name));
+  if (focused()?.s !== name) return;
+  const next = l.filter((x) => x !== name)[Math.min(i, l.length - 2)];
+  if (next) switchTo(next); else history.state?.term ? history.back() : closeTerm();
+}
+const sessState = (s) => s.windows.some((w) => w.prompt) ? 'ask-dot' : s.windows.some((w) => w.running) ? 'run' : '';
+function renderSessTabs() {
+  const cur = focused()?.s;
+  let l = openTabs();
+  if (S.sessions.length && l.some((n) => !findSess(n) && n !== cur)) { l = l.filter((n) => findSess(n) || n === cur); store.set(tabsKey(), l); }
+  if (cur && !l.includes(cur)) l = [...l, cur];
+  const html = l.map((n) => {
+    const s = findSess(n), on = n === cur;
+    const unread = !on && s && s.activity > (lastSeen[`s:${n}`] || 0) && lastSeen[`s:${n}`] !== undefined;
+    return `<div class="stab ${on ? 'on' : ''} ${unread ? 'unread' : ''}"><button class="stab-b" data-s="${esc(n)}" aria-current="${on}" ${on ? 'title="Long-press or right-click for more"' : ''}>
+      <span class="dot ${s ? sessState(s) : 'dead'}"></span><span class="n">${esc(n)}</span></button>${on ? `<button class="stab-x" data-x="${esc(n)}" aria-label="Close tab ${esc(n)}">${icon('x')}</button>` : ''}</div>`;
+  }).join('');
+  if ($('#t-stabs').dataset.sig === html) return;
+  $('#t-stabs').dataset.sig = html; $('#t-stabs').innerHTML = html;
+  $('#t-stabs .stab.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+}
+$('#t-stabs').addEventListener('click', (e) => {
+  const x = e.target.closest('[data-x]'); if (x) return closeTab(x.dataset.x);
+  const b = e.target.closest('[data-s]'); if (b) switchTo(b.dataset.s);
+});
+$('#t-stabs').addEventListener('dblclick', (e) => { if (e.target.closest('.stab.on')) renameSession(); });
+$('#t-stabs').addEventListener('contextmenu', (e) => {
+  const b = e.target.closest('[data-s]'); if (!b) return;
+  e.preventDefault();
+  const n = b.dataset.s;
+  menu(b, [
+    { label: 'Rename session', icon: 'edit', disabled: n !== focused()?.s, run: renameSession },
+    { label: 'Open beside', icon: 'columns', disabled: T.panes.length >= MAX_PANES || n === focused()?.s, run: () => addPane(n) },
+    { label: 'Close tab', icon: 'x', run: () => closeTab(n) },
+    { label: 'Close other tabs', icon: 'x', disabled: openTabs().length < 2, run: () => saveTabs([focused()?.s].filter(Boolean)) },
+  ]);
+});
+$('#btn-opensess').addEventListener('click', (e) => {
+  const l = openTabs();
+  const rest = S.sessions.filter((s) => !l.includes(s.name));
+  menu(e.currentTarget, [...rest.map((s) => ({ label: s.name, sub: whereText(activeWin(s)), icon: s.windows.some((w) => w.prompt) ? 'spark' : 'terminal', run: () => openTerm(s.name) })),
+    ...(rest.length ? ['-'] : []), { label: 'New session…', icon: 'plus', run: () => openNew() }]);
+});
+// Alt+1..9 jumps to a tab; Alt+[ / Alt+] steps through them
+addEventListener('keydown', (e) => {
+  if ($('#term').hidden || !e.altKey || e.ctrlKey || e.metaKey) return;
+  const l = openTabs(), i = l.indexOf(focused()?.s);
+  const to = /^Digit[1-9]$/.test(e.code) ? l[+e.code.slice(5) - 1] : e.code === 'BracketRight' ? l[(i + 1) % l.length] : e.code === 'BracketLeft' ? l[(i - 1 + l.length) % l.length] : null;
+  if (to) { e.preventDefault(); e.stopPropagation(); switchTo(to); }
+}, true);
 
 export function addPane(name, w) {
   if (T.panes.length >= MAX_PANES) return toast(`Up to ${MAX_PANES} views side by side`, true);
@@ -196,12 +269,14 @@ const lastSeen = store.get('seen', {});
 export function renderTermBar() {
   const p = focused(); if (!p) return;
   const s = p.sess, w = p.win;
-  $('#t-name').textContent = p.s;
+  renderSessTabs();
   for (const x of T.panes) { $('.tpn', x.el).textContent = `${x.s} › ${x.win?.name ?? ''}${x.win ? ` · ${whereText(x.win)}` : ''}`; if (x.view && x.sess?.views[x.view] != null) x.wIdx = x.sess.views[x.view]; }
   if (!s || !w) return;
   // tabs: dot = state, ring = output you haven't looked at
   const key = (i) => `${p.s}:${i}`;
   lastSeen[key(w.index)] = Math.max(lastSeen[key(w.index)] || 0, w.activity);
+  lastSeen[`s:${p.s}`] = Math.max(lastSeen[`s:${p.s}`] || 0, s.activity);
+  for (const n of openTabs()) if (n !== p.s && lastSeen[`s:${n}`] === undefined) lastSeen[`s:${n}`] = findSess(n)?.activity || 0;
   store.set('seen', lastSeen);
   const sig = JSON.stringify([s.windows.map((x) => [x.index, x.name, x.activity, x.running, x.prompt?.question, x.bell, x.dead]), w.index, p.s]);
   if ($('#t-tabs').dataset.sig !== sig) {
@@ -220,6 +295,12 @@ export function renderTermBar() {
   else if (ap.preset) { tg.textContent = `Start ${ap.preset.split(' ')[0]}`; tg.className = 'btn sm run'; tg.dataset.a = 'start'; }
   else { tg.textContent = 'Run…'; tg.className = 'btn sm'; tg.dataset.a = 'run'; }
   $('#w-restart').hidden = !ap.preset;
+  const ag = agentOf(ap);
+  $('#w-agent').hidden = !ag;
+  if (ag) $('#w-agent').innerHTML = `${icon(ag === 'claude' ? 'spark' : 'target')}${ag === 'claude' ? 'Claude' : 'Codex'}${ap.status?.mode ? ` <small>${esc(ap.status.mode)}</small>` : ''}`;
+  const ports = S.stats?.sessions[p.s]?.ports || [];
+  $('#w-ports').hidden = !ports.length;
+  $('#w-ports').innerHTML = ports.length ? `${icon('globe')}${ports.length === 1 ? `:${ports[0].port}` : `${ports.length} ports`}` : '';
   $('#w-changes').hidden = !w.branch;
   $('#w-changes').textContent = w.branch ? `⎇ ${w.branch}` : '';
   $('#t-where').innerHTML = whereHtml(w, { branch: false }); // the branch has its own button
@@ -278,18 +359,25 @@ $('#t-ask').addEventListener('click', async (e) => {
   await act(`${W(p.s, $('#t-ask').dataset.t)}/choose`, { n: +b.dataset.n });
   $('#t-ask').hidden = true; setTimeout(refresh, 500);
 });
-$('#t-name').addEventListener('click', async () => {
+async function renameSession() {
   const p = focused(); if (!p) return;
-  const to = await ask({ title: 'Rename session', label: 'Name', value: p.s, ok: 'Rename', validate: NAME_RULE });
-  if (!to || to === p.s) return;
-  await act(`/api/sessions/${encodeURIComponent(p.s)}/rename`, { to });
+  const from = p.s;
+  const to = await ask({ title: 'Rename session', label: 'Name', value: from, ok: 'Rename', validate: NAME_RULE });
+  if (!to || to === from) return;
+  await act(`/api/sessions/${encodeURIComponent(from)}/rename`, { to });
+  store.set(tabsKey(), openTabs().map((n) => n === from ? to : n));
   history.replaceState({ term: to }, ''); p.s = to; await refresh(); p.connect();
-});
+}
 $('#btn-addwin').addEventListener('click', (e) => {
   const p = focused(); if (!p) return;
-  menu(e.currentTarget, [...presetItems(async (pr) => {
-    await act(`/api/sessions/${encodeURIComponent(p.s)}/windows`, { preset: pr.id }); toast(`Opened ${pr.label}`); refresh();
-  }), '-', { label: 'In another folder…', icon: 'folder', run: () => openNew('window', p.s) }]);
+  const cwd = p.win ? activePane(p.win).cwd : '';
+  menu(e.currentTarget, [
+    { label: 'Claude Code…', icon: 'spark', sub: 'new, continue or resume', run: () => openAgent({ kind: 'claude', s: p.s, cwd, where: 'window' }) },
+    { label: 'Codex…', icon: 'target', sub: 'new, continue or resume', run: () => openAgent({ kind: 'codex', s: p.s, cwd, where: 'window' }) },
+    '-',
+    ...presetItems(async (pr) => {
+      await act(`/api/sessions/${encodeURIComponent(p.s)}/windows`, { preset: pr.id }); toast(`Opened ${pr.label}`); refresh();
+    }), '-', { label: 'In another folder…', icon: 'folder', run: () => openNew('window', p.s) }]);
 });
 
 const renameWin = (value) => ask({ title: 'Rename window', label: 'Name', value, ok: 'Rename', validate: (v) => v ? '' : 'Enter a name.' });
@@ -299,7 +387,11 @@ $('#w-toggle').addEventListener('click', async (e) => {
   const a = e.currentTarget.dataset.a;
   if (a === 'stop') { await act(`${c.t}/stop`); toast(`Sent stop to ${c.ap.cmd}`); }
   else if (a === 'start') await act(`${c.t}/start`);
-  else return menu(e.currentTarget, presetItems(async (pr) => { if (pr.cmd) await act(`${c.t}/start`, { preset: pr.id }); refresh(); }));
+  else return menu(e.currentTarget, [
+    { label: 'Claude Code…', icon: 'spark', sub: 'new, continue or resume', run: () => openAgent({ kind: 'claude', s: c.p.s, t: c.t, cwd: c.ap.cwd, where: 'pane' }) },
+    { label: 'Codex…', icon: 'target', sub: 'new, continue or resume', run: () => openAgent({ kind: 'codex', s: c.p.s, t: c.t, cwd: c.ap.cwd, where: 'pane' }) },
+    '-',
+    ...presetItems(async (pr) => { if (pr.cmd) await act(`${c.t}/start`, { preset: pr.id }); refresh(); })]);
   setTimeout(refresh, 700);
 });
 $('#w-restart').addEventListener('click', async () => {
@@ -323,6 +415,48 @@ $('#w-panes').addEventListener('click', (e) => {
       if (await ask({ title: `Close pane ${c.ap.index}?`, message: `${c.ap.cmd} in this pane stops.`, ok: 'Close pane', danger: true })) { await act(W(c.p.s, `${c.w.index}.${c.ap.index}`), null, 'DELETE'); refresh(); }
     } },
   ]);
+});
+// ---------- agent controls: the commands and keys Claude Code and Codex understand ----------
+export const agentOf = (pane) => /^(claude|codex)$/.test(pane?.cmd) ? pane.cmd : /\b(claude|codex)\b/.exec(pane?.running ? pane.preset || '' : '')?.[1] || null;
+const slash = (t, cmd) => async () => { await act(`${t}/keys`, { text: cmd }); await new Promise((r) => setTimeout(r, 120)); await act(`${t}/keys`, { keys: ['Enter'] }); };
+const keys = (t, ...k) => async () => { await act(`${t}/keys`, { keys: k }); setTimeout(refresh, 400); };
+$('#w-agent').addEventListener('click', (e) => {
+  const c = cur(); if (!c) return;
+  const t = `${W(c.p.s, `${c.w.index}.${c.ap.index}`)}`;
+  const claude = agentOf(c.ap) === 'claude';
+  const confirm = (title, message, run) => async () => { if (await ask({ title, message, ok: title.replace(/\?$/, ''), danger: true })) run(); };
+  menu(e.currentTarget, claude ? [
+    { label: 'Interrupt', sub: 'Esc · stops the current step', icon: 'x', run: keys(t, 'Escape') },
+    { label: 'Switch mode', sub: `Shift+Tab${c.ap.status?.mode ? ` · now ${c.ap.status.mode}` : ''}`, icon: 'refresh', run: keys(t, 'BTab') },
+    { label: 'Rewind', sub: '/rewind · go back to an earlier message', icon: 'left', run: slash(t, '/rewind') },
+    '-',
+    { label: 'Compact the conversation', sub: '/compact', icon: 'layers', run: slash(t, '/compact') },
+    { label: 'Context used', sub: '/context', icon: 'grid', run: slash(t, '/context') },
+    { label: 'Change model', sub: '/model', icon: 'spark', run: slash(t, '/model') },
+    { label: 'Resume another conversation', sub: '/resume', icon: 'list', run: slash(t, '/resume') },
+    { label: 'Remote Control', sub: '/remote-control · continue in the Claude app', icon: 'target', run: slash(t, '/remote-control') },
+    { label: 'Status', sub: '/status', icon: 'check', run: slash(t, '/status') },
+    { label: 'All commands', sub: '/help', icon: 'snippet', run: slash(t, '/help') },
+    '-',
+    { label: 'Clear the conversation…', sub: '/clear', icon: 'trash', danger: true, run: confirm('Clear the conversation?', 'Claude starts fresh in this window. The old conversation can still be resumed later.', slash(t, '/clear')) },
+  ] : [
+    { label: 'Interrupt', sub: 'Esc · stops the current step', icon: 'x', run: keys(t, 'Escape') },
+    '-',
+    { label: 'Change model', sub: '/model', icon: 'spark', run: slash(t, '/model') },
+    { label: 'Permissions', sub: '/permissions · what it may do without asking', icon: 'check', run: slash(t, '/permissions') },
+    { label: 'Show changes', sub: '/diff', icon: 'diff', run: slash(t, '/diff') },
+    { label: 'Review changes', sub: '/review', icon: 'target', run: slash(t, '/review') },
+    { label: 'Compact the conversation', sub: '/compact', icon: 'layers', run: slash(t, '/compact') },
+    { label: 'Resume another conversation', sub: '/resume', icon: 'list', run: slash(t, '/resume') },
+    { label: 'Status', sub: '/status', icon: 'grid', run: slash(t, '/status') },
+    '-',
+    { label: 'New conversation…', sub: '/new', icon: 'plus', run: confirm('Start a new conversation?', 'Codex starts fresh in this window. The old one can still be resumed later.', slash(t, '/new')) },
+  ]);
+});
+$('#w-ports').addEventListener('click', (e) => {
+  const p = focused(); const ports = S.stats?.sessions[p?.s]?.ports || []; if (!ports.length) return;
+  if (ports.length === 1) return openPort(ports[0].port);
+  menu(e.currentTarget, ports.map((x) => ({ label: `Open :${x.port}`, sub: x.local ? 'only on this machine, opened through tmuxlab' : 'opened through tmuxlab', icon: 'globe', run: () => openPort(x.port) })));
 });
 $('#w-changes').addEventListener('click', () => { const c = cur(); if (c) openChanges(c.ap.cwd); });
 $('#w-find').addEventListener('click', () => { const c = cur(); if (c) openFind(c.t, `${c.p.s} › ${c.w.name}`); });
@@ -492,3 +626,16 @@ $('#attach-file').addEventListener('change', async (e) => {
 renderKeys();
 
 $('#w-snip').addEventListener('click', (e) => snippets(e.currentTarget));
+
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+$('#mic').hidden = !Speech || !!window.Capacitor?.isNativePlatform?.(); // the WebView has the API but no recogniser; the keyboard's mic works there
+$('#mic').addEventListener('click', () => {
+  if (rec) return rec.stop();
+  const ta = $('#compose-text'), before = ta.value ? ta.value.replace(/\s*$/, ' ') : '';
+  rec = new Speech(); rec.lang = navigator.language; rec.interimResults = true; rec.continuous = true;
+  rec.onresult = (e) => { ta.value = before + [...e.results].map((r) => r[0].transcript).join(''); ta.dispatchEvent(new Event('input')); };
+  rec.onerror = (e) => { if (e.error !== 'aborted' && e.error !== 'no-speech') toast(e.error === 'not-allowed' ? 'Microphone access is blocked for this page.' : `Dictation stopped: ${e.error}`, true); };
+  rec.onend = () => { rec = null; $('#mic').setAttribute('aria-pressed', 'false'); };
+  rec.start(); $('#mic').setAttribute('aria-pressed', 'true');
+});

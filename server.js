@@ -8,11 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
 import { CONF, httpErr, sleep, resolveCwd, loadConf, saveConf, NAME_RE } from './lib/util.js';
-import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, setProject, storedCmd, interrupt, killViews, detectPrompt, VIEW_RE } from './lib/tmux.js';
+import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, setProject, storedCmd, interrupt, killViews, choose, VIEW_RE } from './lib/tmux.js';
+import { claudeHistory, codexHistory } from './lib/agents.js';
 import * as G from './lib/git.js';
-import { stats } from './lib/stats.js';
+import { stats, openPorts } from './lib/stats.js';
+import { forward } from './lib/ports.js';
 import { parseCron, nextRun } from './lib/cron.js';
-import { startWatcher, prompts, lastRuns, notify } from './lib/watch.js';
+import { startWatcher, prompts, status, lastRuns, notify, answerToken } from './lib/watch.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 7681);
@@ -25,14 +27,21 @@ const TOKEN = process.env.TMUXLAB_TOKEN || (fs.existsSync(tokenFile)
   : (() => { const t = crypto.randomBytes(24).toString('base64url'); fs.writeFileSync(tokenFile, t, { mode: 0o600 }); return t; })());
 const authed = (t) => typeof t === 'string' && t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
 
+// addresses other devices can use; Tailscale (100.64/10) first since it also works away from home
+const lanAddrs = () => ['127.0.0.1', 'localhost'].includes(HOST) ? [] : Object.entries(os.networkInterfaces())
+  .filter(([n]) => !/^(docker|br-|veth|virbr|lo)/.test(n)).flatMap(([, a]) => a)
+  .filter((i) => i.family === 'IPv4' && !i.internal).map((i) => i.address)
+  .sort((a, b) => /^100\./.test(b) - /^100\./.test(a));
+
 // --- sessions, windows, panes ---
+const panePids = async () => (await listPanes()).filter((x) => !VIEW_RE.test(x.session_name)).map((x) => ({ session: x.session_name, pid: +x.pane_pid }));
 async function listSessions() {
   const rows = await listPanes();
   const cwds = [...new Set(rows.map((r) => r.pane_current_path))];
   const repos = new Map(await Promise.all(cwds.map(async (c) => [c, await G.repoOf(c)])));
   return shape(rows, (r) => {
     const g = repos.get(r.pane_current_path);
-    return { prompt: prompts.get(r.pane_id) || null, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
+    return { prompt: prompts.get(r.pane_id) || null, status: status.get(r.pane_id) || null, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
   }).list;
 }
 
@@ -148,15 +157,11 @@ const routes = [
     await acts[b.action](); return {};
   }],
   // answer an arrow-key menu (agent permission prompts): move from the selected option to n, then Enter
-  ['POST', r(`${W}/choose`), async ([s, w], b) => {
-    const t = tgt(s, w);
-    const p = detectPrompt(await tmux('capture-pane', '-p', '-t', t));
-    if (!p) throw httpErr(409, 'no question on screen any more');
-    const n = b.n | 0;
-    if (!p.options.some((o) => o.n === n)) throw httpErr(400, 'no such option');
-    for (let i = 0; i < Math.abs(n - p.selected); i++) await tmux('send-keys', '-t', t, n > p.selected ? 'Down' : 'Up');
-    await sleep(80); await tmux('send-keys', '-t', t, 'Enter');
-    return {};
+  ['POST', r(`${W}/choose`), async ([s, w], b) => { await choose(tgt(s, w), b.n | 0); return {}; }],
+  // past Claude Code / Codex conversations started in a folder
+  ['GET', r('/api/agents/(claude|codex)/history'), ([a], _, q) => {
+    const cwd = resolveCwd(q.get('cwd') || '');
+    return a === 'claude' ? claudeHistory(cwd) : codexHistory(cwd);
   }],
   ['POST', r(`${W}/scroll`), async ([s, w], b) => {
     const t = tgt(s, w);
@@ -185,9 +190,14 @@ const routes = [
     const lines = Math.min(+(q.get('lines') || 30), 5000);
     return { text: await tmux('capture-pane', '-p', '-J', '-t', tgt(s, w), '-S', `-${lines}`) };
   }],
+  // open a dev server port through tmuxlab; the link carries a key that only works for that port
+  ['POST', r('/api/ports/(\\d{2,5})/open'), async ([p]) => {
+    const port = +p;
+    if (!openPorts.has(port)) throw httpErr(404, `nothing in a session listens on port ${port}`);
+    const f = await forward(port); return { port: f.port, key: f.key };
+  }],
   ['GET', r('/api/stats'), async () => {
-    const rows = (await listPanes()).filter((x) => !VIEW_RE.test(x.session_name));
-    return stats(rows.map((x) => ({ session: x.session_name, pid: +x.pane_pid })));
+    return stats(await panePids());
   }],
   ['GET', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects|snippets)'), ([n]) => loadConf(n)],
   ['PUT', r('/api/(?:config/)?(presets|stacks|schedules|settings|projects|snippets)'), ([n], b) => {
@@ -221,7 +231,7 @@ const routes = [
       .map((d) => d.name).sort((a, b) => a.localeCompare(b)).slice(0, 500);
     return { path: dir, parent: path.dirname(dir), dirs, git: fs.existsSync(path.join(dir, '.git')), home: os.homedir() };
   }],
-  ['GET', r('/api/info'), async () => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2 })],
+  ['GET', r('/api/info'), async () => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2, addrs: lanAddrs() })],
 ];
 
 // upload into <folder>/.tmuxlab-uploads (git-ignored locally) so agents can read it without leaving the project
@@ -258,7 +268,7 @@ const send = (res, code, body) => {
 };
 
 // --- static files: public/ (xterm and fonts are copied into public/vendor on install) ---
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',
   '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.json': 'application/json' };
 const PUB = path.join(ROOT, 'public');
 
@@ -280,6 +290,12 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('access-control-allow-headers', 'authorization, content-type');
   res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+  const ans = req.method === 'POST' && url.pathname.match(/^\/api\/answer\/([\w-]{20,64})$/);
+  if (ans) {
+    const a = answerToken(ans[1]);
+    if (!a) return send(res, 410, { error: 'this answer link was used or has expired' });
+    try { await choose(a.pane, a.n, a.question); return send(res, 200, { ok: true }); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+  }
   if (!authed((req.headers.authorization || '').replace(/^Bearer /, ''))) return send(res, 401, { error: 'unauthorized' });
   try {
     if (req.method === 'POST' && url.pathname === '/api/upload') return send(res, 200, await upload(req, url.searchParams));
@@ -352,12 +368,10 @@ async function attach(ws, s, q) {
 startWatcher(runSchedule);
 server.listen(PORT, HOST, () => {
   // skip docker/bridge interfaces; a loopback bind is only reachable from localhost
-  const lan = ['127.0.0.1', 'localhost'].includes(HOST) ? [] : Object.entries(os.networkInterfaces())
-    .filter(([n]) => !/^(docker|br-|veth|virbr|lo)/.test(n)).flatMap(([, a]) => a)
-    .filter((i) => i.family === 'IPv4' && !i.internal).map((i) => i.address);
+  const lan = lanAddrs();
   console.log(`tmuxlab listening on ${HOST}:${PORT}\nOpen one of these (the link carries your token):`);
   for (const ip of ['localhost', ...lan]) console.log(`  http://${ip}:${PORT}/#token=${TOKEN}`);
-  console.log(`token: ${tokenFile}\nconfig: ${CONF}`);
+  console.log(`token: ${tokenFile}\nconfig: ${CONF}\nPair a phone: npm run pair (shows a QR code to scan)`);
 });
 
 export { server, TOKEN };

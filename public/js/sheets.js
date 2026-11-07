@@ -1,8 +1,9 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
-import { $, $$, esc, S, api, act, W, toast, store, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText, icon, presetIcon } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, busy, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText, icon, presetIcon, ago } from './core.js';
 import { refresh } from './wall.js';
 import { openTerm, setFont, setTheme, T, THEMES } from './term.js';
 import { start } from './main.js';
+import qrcode from '../vendor/qrcode.js';
 
 // ---------- new session / window ----------
 const dNew = $('#dlg-new');
@@ -327,6 +328,92 @@ $('#sch-list').addEventListener('change', async (e) => {
   await saveSched(list).catch(() => { e.target.checked = !e.target.checked; });
 });
 
+// ---------- start or resume Claude Code / Codex ----------
+const dAg = $('#dlg-agent');
+const ag = { kind: 'claude', conv: 'new', list: [], ctx: {} };
+const OPTS = {
+  claude: [
+    ['mode', 'Permissions', [['', 'Ask before acting (default)'], ['acceptEdits', 'Accept edits without asking'], ['plan', 'Plan only, change nothing'], ['auto', 'Auto mode'], ['bypassPermissions', 'Skip every permission check']]],
+    ['model', 'Model', [['', 'Default'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']]],
+  ],
+  codex: [
+    ['mode', 'Permissions', [['', 'Default'], ['ro', 'Read only'], ['auto', 'Edit this folder, ask for anything else'], ['full', 'Full access, never ask']]],
+    ['model', 'Model', null],
+  ],
+};
+export function openAgent(ctx) {
+  ag.ctx = ctx; ag.conv = 'new'; $('#ag-err').textContent = ''; $('#ag-fork').checked = false;
+  ag.where = ctx.t ? ctx.where : 'window';
+  for (const b of $$('#ag-where [data-w]')) { b.setAttribute('aria-checked', b.dataset.w === ag.where); b.disabled = b.dataset.w === 'pane' && !ctx.t; }
+  setKind(ctx.kind || store.get('agentKind', 'claude'));
+  dAg.showModal();
+}
+async function setKind(k) {
+  ag.kind = k; store.set('agentKind', k); ag.conv = 'new';
+  for (const b of $$('#ag-kind [data-k]')) b.setAttribute('aria-selected', b.dataset.k === k);
+  $('#ag-title').textContent = k === 'claude' ? 'Start Claude Code' : 'Start Codex';
+  const saved = store.get(`agentOpts:${k}`, {});
+  $('#ag-opts').innerHTML = OPTS[k].map(([id, label, choices]) => choices
+    ? `<label>${label}<select id="ag-${id}">${choices.map(([v, l]) => `<option value="${v}" ${saved[id] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+    : `<label>${label}<input id="ag-${id}" value="${esc(saved[id] || '')}" placeholder="Default" autocapitalize="off" spellcheck="false"></label>`).join('');
+  $('#ag-rc-row').hidden = k !== 'claude'; $('#ag-search-row').hidden = k !== 'codex';
+  $('#ag-rc').checked = !!saved.rc; $('#ag-search').checked = !!saved.search;
+  $('#ag-convs').innerHTML = '<p class="muted small">Looking for earlier conversations…</p>';
+  renderAgCmd();
+  try { ag.list = await api(`/api/agents/${k}/history?cwd=${encodeURIComponent(ag.ctx.cwd || '~')}`); } catch { ag.list = []; }
+  if (ag.kind === k) renderConvs();
+}
+function renderConvs() {
+  const row = (v, title, sub) => `<label class="conv"><input type="radio" name="agc" value="${esc(v)}" ${ag.conv === v ? 'checked' : ''}><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span></label>`;
+  $('#ag-convs').innerHTML = row('new', 'New conversation', '') +
+    (ag.list.length ? row('last', 'Continue the latest', ag.list[0].title) : '') +
+    ag.list.map((c) => row(c.id, c.title || 'Conversation', `${ago(Date.parse(c.when) / 1000)}${c.first && c.first !== c.title ? ` · ${c.first}` : ''}`)).join('') +
+    (ag.list.length ? '' : '<p class="muted small">No earlier conversations in this folder.</p>');
+  renderAgCmd();
+}
+function agCmd() {
+  const v = (id) => $(`#ag-${id}`)?.value.trim() || '', c = ag.conv, model = v('model');
+  if (model && !/^[\w.:-]{1,64}$/.test(model)) throw new Error('Model names use letters, digits, dots, dashes and colons.');
+  if (!/^(new|last|[\w-]{1,80})$/.test(c)) throw new Error('That conversation id looks wrong.'); // it is typed into a shell
+  if (ag.kind === 'claude') return ['claude', c === 'last' && '--continue', c !== 'new' && c !== 'last' && `--resume ${c}`,
+    c !== 'new' && $('#ag-fork').checked && '--fork-session', v('mode') && `--permission-mode ${v('mode')}`, model && `--model ${model}`,
+    $('#ag-rc').checked && `--remote-control ${ag.ctx.s || 'tmuxlab'}`].filter(Boolean).join(' ');
+  const mode = { ro: '-s read-only', auto: '-s workspace-write -a on-request', full: '--dangerously-bypass-approvals-and-sandbox' }[v('mode')];
+  return [c === 'new' ? 'codex' : c === 'last' ? 'codex resume --last' : `codex resume ${c}`, mode, model && `-m ${model}`, $('#ag-search').checked && '--search'].filter(Boolean).join(' ');
+}
+function renderAgCmd() {
+  $('#ag-fork-row').hidden = ag.kind !== 'claude' || ag.conv === 'new';
+  try { $('#ag-cmd').textContent = agCmd(); $('#ag-err').textContent = ''; } catch (e) { $('#ag-err').textContent = e.message; }
+}
+$('#ag-kind').addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b && b.dataset.k !== ag.kind) setKind(b.dataset.k); });
+$('#ag-where').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-w]'); if (!b || b.disabled) return;
+  ag.where = b.dataset.w; for (const x of $$('#ag-where [data-w]')) x.setAttribute('aria-checked', x === b);
+});
+$('#agent-form').addEventListener('change', (e) => { if (e.target.name === 'agc') ag.conv = e.target.value; renderAgCmd(); });
+$('#agent-form').addEventListener('input', renderAgCmd);
+$('#ag-go').addEventListener('click', () => busy($('#ag-go'), async () => {
+  let cmd; try { cmd = agCmd(); } catch (e) { $('#ag-err').textContent = e.message; return; }
+  store.set(`agentOpts:${ag.kind}`, { mode: $('#ag-mode').value, model: $('#ag-model').value.trim(), rc: $('#ag-rc').checked, search: $('#ag-search').checked });
+  const { s, t, cwd } = ag.ctx;
+  try {
+    if (ag.where === 'pane') await api(`${t}/start`, { method: 'POST', body: { cmd } });
+    else await api(`/api/sessions/${encodeURIComponent(s)}/windows`, { method: 'POST', body: { cmd, label: ag.kind, ...(cwd ? { cwd } : {}) } });
+  } catch (e) { $('#ag-err').textContent = e.message; return; }
+  dAg.close(); toast(`Started ${ag.kind === 'claude' ? 'Claude Code' : 'Codex'}`); setTimeout(refresh, 600);
+}));
+
+// ---------- pair a phone: this machine's link as a QR code ----------
+$('#set-pair').addEventListener('click', () => {
+  let base = cfg().base;
+  if (isLocal(base) && S.info?.addrs?.length) { const u = new URL(base); u.hostname = S.info.addrs[0]; base = u.origin; } // a phone can't reach "localhost"
+  const url = `${base}/#token=${cfg().token}`;
+  const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+  $('#pair-qr').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 3, scalable: true });
+  $('#pair-url').textContent = isLocal(base) ? 'This page was opened as localhost, which a phone cannot reach. Open tmuxlab by its network address, or run npm run pair.' : base;
+  $('#dlg-pair').showModal();
+});
+
 // ---------- settings ----------
 const dSet = $('#dlg-settings');
 export async function openSettings(tab = 'alerts') {
@@ -342,7 +429,7 @@ export async function openSettings(tab = 'alerts') {
   setTab(tab);
   dSet.showModal();
   try {
-    const st = await api('/api/config/settings');
+    const st = alertCfg = await api('/api/config/settings');
     $('#al-url').value = st.ntfy; $('#al-prompts').checked = st.alerts.prompts; $('#al-quiet').checked = st.alerts.quiet;
     $('#al-finished').checked = st.alerts.finished; $('#al-secs').value = st.alerts.quietSeconds; $('#al-agents').value = st.agents.join(', ');
     $('#al-sub').hidden = !st.ntfy; $('#al-sub').href = st.ntfy.replace(/^http:/, 'https:');
@@ -373,9 +460,12 @@ $('#set-tabs').addEventListener('click', (e) => { const b = e.target.closest('[d
 $('#al-gen').addEventListener('click', () => {
   $('#al-url').value = `https://ntfy.sh/tmuxlab-${crypto.getRandomValues(new Uint32Array(2)).reduce((a, n) => a + n.toString(36), '')}`;
 });
+let alertCfg = {};
+const isLocal = (b) => /^https?:\/\/(localhost|127\.|\[::1\])/.test(b);
 async function saveAlerts() {
   const url = $('#al-url').value.trim();
-  const body = { ntfy: url, alerts: { prompts: $('#al-prompts').checked, quiet: $('#al-quiet').checked, finished: $('#al-finished').checked,
+  const base = isLocal(cfg().base) ? alertCfg.base : cfg().base; // localhost means nothing to a phone
+  const body = { ...(base ? { base } : {}), ntfy: url, alerts: { prompts: $('#al-prompts').checked, quiet: $('#al-quiet').checked, finished: $('#al-finished').checked,
     quietSeconds: Math.max(5, +$('#al-secs').value || 20) }, agents: $('#al-agents').value.split(/[,\s]+/).filter(Boolean) };
   await act('/api/config/settings', body, 'PUT');
   $('#al-sub').hidden = !url; $('#al-sub').href = url.replace(/^http:/, 'https:');
