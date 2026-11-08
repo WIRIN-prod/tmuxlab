@@ -2,8 +2,8 @@ apiVersion: v2
 name: tmuxlab
 description: Run coding agents in parallel in tmux and drive them from a browser or your phone
 type: application
-version: 2.11.0
-appVersion: "2.11.0"
+version: 2.11.1
+appVersion: "2.11.1"
 home: https://github.com/WIRIN-prod/tmuxlab
 sources: [https://github.com/WIRIN-prod/tmuxlab]
 keywords: [tmux, terminal, claude-code, codex]

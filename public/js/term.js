@@ -24,6 +24,19 @@ export const T = {
   fontSize: store.get('font', touch ? 13 : 14), theme: store.get('theme', 'ink'), wake: null,
 };
 const MAX_PANES = 4;
+let lastCopy = '';
+function copyText(t) {
+  if (!t || t === lastCopy && Date.now() - copyText.at < 1000) return;
+  lastCopy = t; copyText.at = Date.now();
+  const done = () => toast(`Copied ${t.length > 40 ? `${t.length} characters` : `“${t.trim()}”`}`);
+  const legacy = () => { // plain-http pages have no navigator.clipboard
+    const a = document.createElement('textarea'); a.value = t; a.style.cssText = 'position:fixed;opacity:0';
+    const f = document.activeElement; document.body.append(a); a.select();
+    const ok = document.execCommand('copy'); a.remove(); f?.focus?.();
+    ok ? done() : toast('The browser blocked copying: use Find to copy output', true);
+  };
+  navigator.clipboard?.writeText ? navigator.clipboard.writeText(t).then(done, legacy) : legacy();
+}
 const focused = () => T.panes[T.focus];
 
 class Pane {
@@ -41,6 +54,12 @@ class Pane {
     this.term.loadAddon(this.fit);
     this.term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => window.open(uri, '_blank')));
     this.term.onData((d) => this.send(applyMods(d)));
+    // tmux (and apps) copy by sending OSC 52 to the terminal: put that text on the device clipboard
+    this.term.parser.registerOscHandler(52, (d) => {
+      const b = d.slice(d.indexOf(';') + 1);
+      if (b && b !== '?') try { copyText(new TextDecoder().decode(Uint8Array.from(atob(b), (c) => c.charCodeAt(0)))); } catch {}
+      return true;
+    });
     this.term.onResize(({ cols, rows }) => this.ctl({ t: 'resize', cols, rows }));
     // wheel scrolls tmux history unless the program asked for the mouse
     this.term.attachCustomWheelEventHandler((e) => {
@@ -49,6 +68,8 @@ class Pane {
       return false;
     });
     this.el.addEventListener('pointerdown', () => setFocus(T.panes.indexOf(this)), true);
+    // a mouse selection in the terminal itself (Shift+drag when the program uses the mouse) copies on release
+    this.el.addEventListener('mouseup', () => { if (this.term.hasSelection()) copyText(this.term.getSelection()); });
     $('[data-x]', this.el).onclick = (e) => { e.stopPropagation(); closePane(this); };
     $('.tpn', this.el).onclick = (e) => slotMenu(this, e.currentTarget);
     $('.tph', this.el).ondblclick = (e) => { if (!e.target.closest('button')) toggleZoom(); };
