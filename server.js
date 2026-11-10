@@ -182,7 +182,7 @@ const routes = [
     const up = b.dir === 'up';
     const [inMode, alt, mouse, sgr, wd, ht] = (await tmux('display-message', '-p', '-t', t,
       '#{pane_in_mode} #{alternate_on} #{mouse_any_flag} #{mouse_sgr_flag} #{pane_width} #{pane_height}')).trim().split(' ').map(Number);
-    // full-screen apps (Claude Code, codex, vim, less) keep their own scrollback: do what a terminal does with a wheel
+    // full-screen apps that take the mouse (Claude Code, codex, vim) keep their own scrollback: send them the wheel
     if (!inMode && alt) {
       if (mouse) {
         const x = Math.ceil(wd / 2), y = Math.ceil(ht / 2), btn = up ? 64 : 65;
@@ -190,9 +190,8 @@ const routes = [
         await tmux('send-keys', '-t', t, '-l', ev.repeat(Math.min(40, Math.max(1, Math.round(lines / 3))))); // one wheel notch ≈ 3 lines
         return { mode: 'app' };
       }
-      await tmux('send-keys', '-t', t, '-N', String(Math.min(lines, 100)), up ? 'Up' : 'Down'); // xterm's alternateScroll
-      return { mode: 'keys' };
-    }
+    } // never arrow keys: in a prompt they walk back through its history and fill the input
+
     // -e: copy mode exits by itself when scrolled back to the bottom
     if (up) { await tmux('copy-mode', '-e', '-t', t); await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-up'); return { mode: 'copy' }; }
     if (inMode) await tmux('send-keys', '-t', t, '-X', '-N', n, 'scroll-down').catch(() => {});
@@ -252,7 +251,7 @@ const routes = [
     return { path: dir, parent: path.dirname(dir), dirs, git: fs.existsSync(path.join(dir, '.git')), home: os.homedir() };
   }],
   ['GET', r('/api/info'), async (_, __, ___, who) => ({ host: os.hostname(), user: os.userInfo().username, tmux: (await tmux('-V')).trim(), version: 2,
-    addrs: lanAddrs(), apk: apkVersion(), role: who.role, session: who.session, self: who.id, auth: who.master ? 'server' : 'device' })],
+    addrs: lanAddrs(), port: PORT, apk: apkVersion(), role: who.role, session: who.session, self: who.id, auth: who.master ? 'server' : 'device' })],
   // devices: each gets its own token (the server token only signs devices in); share links are view-only devices
   ['GET', r('/api/devices'), (_, __, ___, who) => ({ self: who.id, devices: auth.list() })],
   ['POST', r('/api/devices'), (_, b) => auth.issue({ name: b.name })],

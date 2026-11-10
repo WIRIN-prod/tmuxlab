@@ -7,7 +7,7 @@ for (const [src, dst] of [
   ['qrcode-generator/dist/qrcode.mjs', 'qrcode.js'],
 ]) cpSync(`node_modules/${src}`, `public/vendor/${dst}`);
 let css = '';
-for (const [pkg, fam, weights] of [['ibm-plex-sans', 'IBM Plex Sans', [400, 500, 600]], ['jetbrains-mono', 'JetBrains Mono', [400, 600]]]) {
+for (const [pkg, fam, weights] of [['inter', 'Inter', [400, 500, 600]], ['geist-sans', 'Geist', [500, 600]], ['jetbrains-mono', 'JetBrains Mono', [400, 500, 700]]]) {
   for (const w of weights) {
     const f = `${pkg}-latin-${w}-normal.woff2`;
     cpSync(`node_modules/@fontsource/${pkg}/files/${f}`, `public/vendor/${f}`);

@@ -1,7 +1,7 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
 import { $, $$, esc, S, api, act, W, toast, store, busy, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText, icon, presetIcon, ago } from './core.js';
 import { refresh } from './wall.js';
-import { openTerm, addPane, setFont, setTheme, T, THEMES } from './term.js';
+import { openTerm, addPane, setFont, setTheme, setUi, T, THEMES } from './term.js';
 import { start } from './main.js';
 import qrcode from '../vendor/qrcode.js';
 
@@ -602,7 +602,7 @@ export async function openSettings(tab = 'alerts') {
   $('#set-stacks').value = JSON.stringify(S.stacks, null, 2);
   renderSnips(S.snippets);
   $('#set-theme').innerHTML = Object.keys(THEMES).map((k) => `<option value="${k}">${k[0].toUpperCase() + k.slice(1)}</option>`).join('');
-  $('#set-theme').value = T.theme;
+  $('#set-theme').value = T.theme; $('#set-ui').value = document.documentElement.dataset.ui;
   $('#set-font').value = T.fontSize;
   $('#set-awake').checked = store.get('awake', touch);
   setTab(tab);
@@ -658,7 +658,7 @@ $('#set-save').addEventListener('click', async () => {
     [S.presets, S.stacks, S.snippets] = await Promise.all([api('/api/config/presets', { method: 'PUT', body: presets }), api('/api/config/stacks', { method: 'PUT', body: stacks }),
       api('/api/config/snippets', { method: 'PUT', body: readSnips() })]);
     await saveAlerts();
-    setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked);
+    setUi($('#set-ui').value); setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked);
     dSet.close(); toast('Settings saved');
   } catch (e) { $('#set-err').textContent = e.message; }
 });

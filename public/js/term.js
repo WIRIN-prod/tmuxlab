@@ -1,13 +1,13 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
-import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, ask, afterNav, onBack, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
+import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, origin, failover, ask, afterNav, onBack, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent, openPalette } from './sheets.js';
 
 export const THEMES = {
-  ink: { background: '#070D18', foreground: '#E2E9F6', cursor: '#5B9BFF', cursorAccent: '#070D18', selectionBackground: '#5B9BFF55',
-    black: '#0A1220', brightBlack: '#6178AB', red: '#FF7385', green: '#5BE3A6', yellow: '#FFB04C', blue: '#5B9BFF',
-    magenta: '#C79BFF', cyan: '#3FD8F2', white: '#C9D4E8', brightRed: '#FF9AA8', brightGreen: '#8CF0C2', brightYellow: '#FFCB80',
-    brightBlue: '#8DB8FF', brightMagenta: '#DDBFFF', brightCyan: '#86E8F8', brightWhite: '#FFFFFF' },
+  ink: { background: '#121215', foreground: '#e4e4e7', cursor: '#34d399', cursorAccent: '#121215', selectionBackground: '#10b98140',
+    black: '#18181b', brightBlack: '#71717a', red: '#f87171', green: '#34d399', yellow: '#fbbf24', blue: '#60a5fa',
+    magenta: '#c084fc', cyan: '#38bdf8', white: '#d4d4d8', brightRed: '#fca5a5', brightGreen: '#6ee7b7', brightYellow: '#fde68a',
+    brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#7dd3fc', brightWhite: '#fafafa' },
   dusk: { background: '#17141F', foreground: '#E6E1F0', cursor: '#FFB86B', selectionBackground: '#8A7CFF55',
     black: '#17141F', brightBlack: '#5F5873', red: '#FF6F91', green: '#7EE0A1', yellow: '#FFD36B', blue: '#8AB4FF',
     magenta: '#C792EA', cyan: '#7FDBCA', white: '#E6E1F0', brightWhite: '#FFFFFF' },
@@ -21,7 +21,7 @@ export const THEMES = {
 
 export const T = {
   panes: [], focus: 0, mods: { ctrl: false, alt: false },
-  fontSize: store.get('font', touch ? 13 : 14), theme: store.get('theme', 'ink'), wake: null,
+  fontSize: store.get('font', 13), theme: store.get('theme', 'ink'), wake: null,
 };
 const MAX_PANES = 4;
 let lastCopy = '';
@@ -48,12 +48,12 @@ class Pane {
       <div class="tbody"><div class="xt"></div>
       <div class="banner" hidden><span>Reconnecting…</span><button class="btn sm">Retry now</button></div>
       <div class="scrollhint" hidden>History · scroll down to return<button class="btn sm">Exit</button></div></div>`;
-    this.term = new Terminal({ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: T.fontSize, cursorBlink: true,
+    this.term = new Terminal({ rightClickSelectsWord: false, fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace", fontSize: T.fontSize, lineHeight: 1.25, cursorBlink: true,
       allowProposedApi: true, scrollback: 0, theme: THEMES[T.theme] }); // tmux owns history
     this.fit = new FitAddon.FitAddon();
     this.term.loadAddon(this.fit);
     this.term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => window.open(uri, '_blank')));
-    this.term.onData((d) => this.send(applyMods(d)));
+    this.term.onData((d) => this.input(applyMods(d)));
     // tmux (and apps) copy by sending OSC 52 to the terminal: put that text on the device clipboard
     this.term.parser.registerOscHandler(52, (d) => {
       const b = d.slice(d.indexOf(';') + 1);
@@ -61,15 +61,41 @@ class Pane {
       return true;
     });
     this.term.onResize(({ cols, rows }) => this.ctl({ t: 'resize', cols, rows }));
-    // wheel scrolls tmux history unless the program asked for the mouse
+    // the wheel always goes through the server, which scrolls tmux history or, for an app that takes the mouse, sends it
+    // the wheel; never through tmux's own mouse handling, which turns it into arrow keys in some apps
     this.term.attachCustomWheelEventHandler((e) => {
-      if (this.term.modes.mouseTrackingMode !== 'none') return true;
       queueScroll(this, e.deltaY < 0 ? -3 : 3);
       return false;
     });
     this.el.addEventListener('pointerdown', () => setFocus(T.panes.indexOf(this)), true);
     // a mouse selection in the terminal itself (Shift+drag when the program uses the mouse) copies on release
     this.el.addEventListener('mouseup', () => { if (this.term.hasSelection()) copyText(this.term.getSelection()); });
+    // the left button always selects text, even when the program (tmux, Claude Code) uses the mouse: xterm does that for
+    // Shift+drag, so restart the press with Shift held. Alt+click still reaches the program.
+    this.term.attachCustomKeyEventHandler((e) => !(e.type === 'keydown' && e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'KeyV'));
+    const xt = $('.xt', this.el);
+    xt.addEventListener('mousedown', (e) => {
+      if (!e.isTrusted || e.altKey || e.shiftKey || this.term.modes.mouseTrackingMode === 'none') return;
+      if (e.button === 2) { // right button pastes, not a program click
+        e.stopImmediatePropagation(); e.preventDefault();
+        if (!navigator.clipboard?.readText) { // plain http: put the input under the mouse so the browser's own menu offers Paste
+          const ta = $('.xterm-helper-textarea', this.el), b = xt.getBoundingClientRect();
+          Object.assign(ta.style, { left: `${e.clientX - b.left - 10}px`, top: `${e.clientY - b.top - 10}px`, width: '20px', height: '20px', zIndex: 1000 });
+          ta.focus(); setTimeout(() => Object.assign(ta.style, { left: '', top: '', width: '', height: '', zIndex: '' }), 200);
+        }
+        return;
+      }
+      if (e.button !== 0) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      this.term.clearSelection(); // or Shift would extend the old selection
+      e.target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, detail: e.detail, screenX: e.screenX, screenY: e.screenY,
+        clientX: e.clientX, clientY: e.clientY, button: 0, buttons: e.buttons, shiftKey: true }));
+    }, true);
+    xt.addEventListener('contextmenu', (e) => {
+      if (touch || e.altKey || !navigator.clipboard?.readText) return; // phones and plain http keep the browser's own menu (it has Paste)
+      e.preventDefault(); e.stopPropagation();
+      navigator.clipboard.readText().then((t) => { if (t) { paste(t); this.term.focus(); } }, () => toast('The browser blocked reading the clipboard: press Ctrl+V instead', true));
+    }, true);
     $('[data-x]', this.el).onclick = (e) => { e.stopPropagation(); closePane(this); };
     $('.tpn', this.el).onclick = (e) => slotMenu(this, e.currentTarget);
     $('.tph', this.el).ondblclick = (e) => { if (!e.target.closest('button')) toggleZoom(); };
@@ -90,11 +116,18 @@ class Pane {
     return s.windows.find((w) => w.index === idx) || activeWin(s);
   }
   send(d) { if (this.ws?.readyState === 1) this.ws.send(d); }
+  // typing while scrolled back returns to the bottom first, so the keys reach the program (tmux copy mode would eat them)
+  input(d) {
+    if (this.win?.inMode && !this.back) this.back = api(`${W(this.s, this.win.index)}/scroll`, { method: 'POST', body: { dir: 'cancel' } }).catch(() => {})
+      .finally(() => { if (this.win) this.win.inMode = false; $('.scrollhint', this.el).hidden = true; });
+    if (this.back) { const b = this.back; b.then(() => { if (this.back === b) this.back = null; this.send(d); }); return; }
+    this.send(d);
+  }
   ctl(o) { this.send('\x00' + JSON.stringify(o)); }
   connect() {
     clearTimeout(this.timer);
     if (this.ws) { this.ws.onclose = null; this.ws.close(); }
-    const u = new URL('/ws', cfg().base);
+    const u = new URL('/ws', origin());
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     const w = this.wIdx ?? this.w0; // the old view is gone after a disconnect, so remember the window
     u.search = new URLSearchParams({ s: this.s, token: cfg().token, cols: this.term.cols, rows: this.term.rows, ...(w != null ? { w } : {}) });
@@ -116,6 +149,8 @@ class Pane {
         await refresh();
         if (!this.sess) { toast(`Session ${this.s} ended`); return closePane(this); }
       }
+      if (this.retry === 1) await failover(); // the address may have changed (another network, Tailscale): try the others
+      if (this.ws !== ws) return;
       this.timer = setTimeout(() => this.connect(), Math.min(10000, 500 * 2 ** this.retry++));
     };
   }
@@ -124,7 +159,7 @@ class Pane {
     // stays up through retry attempts, so it doesn't flicker
     const b = $('.banner', this.el);
     if (state === 'ok') b.hidden = true;
-    if (state === '') { b.hidden = false; $('span', b).textContent = this.retry > 2 ? `Can't reach ${new URL(cfg().base).host}. Retrying…` : 'Reconnecting…'; }
+    if (state === '') { b.hidden = false; $('span', b).textContent = this.retry > 2 ? `Can't reach ${new URL(origin()).host}. Retrying…` : 'Reconnecting…'; }
     if (this === focused()) renderConn();
   }
   dispose() {
@@ -203,17 +238,29 @@ export function openTerm(name, w) {
   addTab(name);
   if (!$('#term').hidden && T.panes.length) return switchTo(name, w);
   afterNav(() => history.pushState({ term: name }, ''));
-  for (const p of T.panes) p.dispose();
-  T.panes = []; T.focus = 0; T.zoom = false;
-  $('#wall').hidden = true; $('#term').hidden = false;
-  const saved = store.get(layoutKey(), null);
-  const slots = (saved?.slots || []).filter(([s]) => findSess(s)).slice(0, MAX_PANES);
-  T.arr = saved?.arr || 'main';
-  if (slots.length > 1 && canSplit() && slots.some(([s]) => s === name)) {
-    for (const [s, wi] of slots) addPane(s, s === name && w != null ? w : wi ?? undefined);
-    setFocus(slots.findIndex(([s]) => s === name));
-  } else addPane(name, w);
+  morph(rowOf(name), () => {
+    for (const p of T.panes) p.dispose();
+    T.panes = []; T.focus = 0; T.zoom = false;
+    $('#wall').hidden = true; $('#term').hidden = false;
+    const saved = store.get(layoutKey(), null);
+    const slots = (saved?.slots || []).filter(([s]) => findSess(s)).slice(0, MAX_PANES);
+    T.arr = saved?.arr || 'main';
+    if (slots.length > 1 && canSplit() && slots.some(([s]) => s === name)) {
+      for (const [s, wi] of slots) addPane(s, s === name && w != null ? w : wi ?? undefined);
+      setFocus(slots.findIndex(([s]) => s === name));
+    } else addPane(name, w);
+    return focused()?.el;
+  });
   keepAwake(true);
+}
+const rowOf = (name) => name && $(`#grid .card[data-s="${CSS.escape(name)}"]`);
+// one element morphs into another across the page change (View Transitions); plain swap without support or with reduced motion
+function morph(from, update) {
+  if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) return update();
+  if (from) from.style.viewTransitionName = 'sess';
+  let to = null;
+  const vt = document.startViewTransition(() => { if (from) from.style.viewTransitionName = ''; to = update(); if (to) to.style.viewTransitionName = 'sess'; });
+  vt.finished.finally(() => { if (to) to.style.viewTransitionName = ''; });
 }
 
 // ---------- session tabs: sessions you have open, one tap apart ----------
@@ -317,10 +364,15 @@ function closePane(p) {
 }
 
 export function closeTerm() {
-  for (const p of T.panes) p.dispose();
-  T.panes = [];
+  const name = focused()?.s;
+  morph(focused()?.el, () => {
+    for (const p of T.panes) p.dispose();
+    T.panes = [];
+    $('#term').hidden = true; $('#wall').hidden = false;
+    document.body.classList.remove('rail');
+    return rowOf(name);
+  });
   keepAwake(false);
-  $('#term').hidden = true; $('#wall').hidden = false;
   refresh().then(refreshPreviews);
 }
 $('#btn-back').addEventListener('click', () => history.state?.term ? history.back() : closeTerm());
@@ -367,28 +419,29 @@ const agentsOpen = () => wide.matches ? store.get('agentsPanel', true) : $('#btn
 function allAgents() {
   const out = [];
   for (const s of S.sessions) for (const w of s.windows) for (const p of w.panes || []) if (p.agent) out.push({ s, w, p, ...p.agent });
-  return out.sort((a, b) => AG_ORDER[a.state] - AG_ORDER[b.state] || b.since - a.since);
+  return out.sort((a, b) => a.s.name.localeCompare(b.s.name) || a.w.index - b.w.index || a.p.index - b.p.index);
 }
 function renderAgents() {
   const list = allAgents(), cur = focused();
   const n = list.filter((a) => a.state === 'blocked').length;
   $('#t-agents-n').hidden = !n; $('#t-agents-n').textContent = n;
-  const shells = S.sessions.filter((s) => !s.windows.some((w) => (w.panes || []).some((p) => p.agent)));
+  const shells = S.sessions.filter((s) => !s.windows.some((w) => (w.panes || []).some((p) => p.agent))).sort((a, b) => a.name.localeCompare(b.name));
   $('#btn-agents').hidden = !list.length && !shells.length;
   const show = (list.length > 0 || shells.length > 0) && agentsOpen();
   $('#t-agents').hidden = !show; $('#btn-agents').setAttribute('aria-expanded', String(show));
+  document.body.classList.toggle('rail', show && wide.matches);
   // with three or more views the panel folds to its state dots, so the terminals keep their width
   $('#t-agents').classList.toggle('mini', wide.matches && T.panes.length >= 3);
   if (!show) return;
   const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.prompt?.question, a.p.status?.last, a.w.name]), shells.map((s) => [s.name, s.windows.some((w) => w.running)]), cur?.s, cur?.win?.index, T.panes.map((p) => p.s), T.panes.length >= 3]);
   if ($('#t-agents').dataset.sig === sig) return;
   $('#t-agents').dataset.sig = sig;
-  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button draggable="true" class="ag ag-${a.state}" title="${esc(`${a.agent} ${a.s.name}: ${AG_LABEL[a.state]}`)}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
+  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button draggable="true" class="ag ag-${a.state} ${T.panes.some((x) => x.s === a.s.name) ? 'shown' : ''}" title="${esc(`${a.agent} ${a.s.name}: ${AG_LABEL[a.state]}`)}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
     aria-current="${cur?.s === a.s.name && cur?.win?.index === a.w.index}">
     <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}${a.s.windows.length > 1 ? ` › ${esc(a.w.name)}` : ''}</span></span>
     <span class="ag-st">${AG_LABEL[a.state]} · ${ago(a.since / 1000)}</span>
     ${a.p.prompt?.question || a.p.status?.last ? `<span class="ag-l">${esc(a.p.prompt?.question || a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>
-    ${shells.length ? `<h2 class="small muted">Other sessions</h2><ul>${shells.map((s) => { const w = activeWin(s); return `<li><button draggable="true" class="ag ag-shell" title="${esc(s.name)}" data-s="${esc(s.name)}" data-w="${w.index}" data-p="${activePane(w).index}" aria-current="${cur?.s === s.name}">
+    ${shells.length ? `<h2 class="small muted">Other sessions</h2><ul>${shells.map((s) => { const w = activeWin(s); return `<li><button draggable="true" class="ag ag-shell ${T.panes.some((x) => x.s === s.name) ? 'shown' : ''}" title="${esc(s.name)}" data-s="${esc(s.name)}" data-w="${w.index}" data-p="${activePane(w).index}" aria-current="${cur?.s === s.name}">
     <span class="dot ${s.windows.some((x) => x.running) ? 'run' : ''}"></span><span class="ag-t"><b>${esc(s.name)}</b> <span class="muted">${esc(activePane(w).cmd || 'shell')}</span></span></button></li>`; }).join('')}</ul>` : ''}`;
 }
 $('#btn-agents').addEventListener('click', () => {
@@ -681,6 +734,9 @@ export function setTheme(name) {
   document.documentElement.dataset.term = T.theme;
 }
 document.documentElement.dataset.term = T.theme;
+// app chrome: dark (default), light, or follow the system
+export function setUi(v) { document.documentElement.dataset.ui = ['light', 'auto'].includes(v) ? v : 'dark'; store.set('ui', document.documentElement.dataset.ui); }
+document.documentElement.dataset.ui = store.get('ui', 'dark');
 
 // ---------- scrolling and pinch zoom ----------
 // The server picks the right kind of scroll: tmux history for shells, wheel events for full-screen
@@ -793,7 +849,7 @@ function applyMods(d) {
   if (T.mods.ctrl || T.mods.alt) { T.mods.ctrl = T.mods.alt = false; renderKeys(); }
   return d;
 }
-export const sendInput = (d) => focused()?.send(d);
+export const sendInput = (d) => focused()?.input(d);
 const paste = (t) => sendInput(t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t);
 // snippets: saved ones (Settings > Snippets), then recent message-box sends; typed and run in the focused pane
 function snippets(anchor) {

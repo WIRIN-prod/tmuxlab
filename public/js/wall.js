@@ -40,6 +40,7 @@ function renderStats() {
   const waiting = all.flatMap((s) => s.windows).filter((w) => w.prompt).length;
   const n = { all: all.length, running: runs, waiting, idle: all.filter((s) => !s.windows.some((w) => w.running)).length };
   for (const b of $('#filters').children) b.dataset.n = n[b.dataset.f] || '';
+  $('#dock-n').textContent = waiting || '';
   $('#stats').innerHTML = `${m ? `<span class="machine"><span class="mstat" title="${m.cores} cores, load ${m.load.toFixed(2)}">CPU <b>${m.cpu == null ? '…' : Math.round(m.cpu) + '%'}</b></span>
     <span class="mstat" title="${bytes(m.mem.used)} of ${bytes(m.mem.total)}">RAM <b>${Math.round(100 * m.mem.used / m.mem.total)}%</b></span>
     ${m.disk ? `<span class="mstat ${m.disk.used / m.disk.total > 0.9 ? 'warn' : ''}">Disk <b>${Math.round(100 * m.disk.used / m.disk.total)}%</b></span>` : ''}</span>` : ''}`;
@@ -316,7 +317,7 @@ $('#filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   S.filter = b.dataset.f;
   for (const x of $('#filters').children) x.setAttribute('aria-selected', x === b);
-  store.set('filter', S.filter);
+  store.set('filter', S.filter); syncDock();
   renderWall(); refreshPreviews();
 });
 $('#btn-new').addEventListener('click', () => openNew());
@@ -366,6 +367,14 @@ function closeNav() {
   const r = navRelease; navRelease = null; r?.();
 }
 $('#btn-nav').addEventListener('click', openNav);
+// phone dock: Sessions and Needs you are the list's filters; Jump to and More open the palette and the menu
+$('#dock').addEventListener('click', (e) => {
+  const d = e.target.closest('[data-dock]')?.dataset.dock; if (!d) return;
+  if (d === 'jump') return $('#btn-palette').click();
+  if (d === 'more') return openNav();
+  $(`#filters [data-f="${d}"]`).click(); scrollTo({ top: 0 });
+});
+const syncDock = () => { for (const b of $$('#dock [data-dock]')) b.setAttribute('aria-current', b.dataset.dock === S.filter); };
 $('#nav-scrim').addEventListener('click', closeNav);
 $('#nav').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
 $('#nav').addEventListener('click', (e) => { if (e.target.closest('.nav-item:not(.mach)')) closeNav(); });
@@ -409,3 +418,4 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'n' && !e.ctrlKey && !e.metaKey && e.target === document.body) { e.preventDefault(); openNew(); }
 });
 for (const x of $('#filters').children) x.setAttribute('aria-selected', x.dataset.f === S.filter);
+syncDock();

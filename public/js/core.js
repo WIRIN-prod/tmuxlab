@@ -7,7 +7,7 @@ export const store = {
   set(k, v) { try { localStorage.setItem('tl.' + k, JSON.stringify(v)); } catch {} },
 };
 export const isApp = !!window.Capacitor?.isNativePlatform?.();
-export const VERSION = '2.11.1'; // this build; kept equal to package.json by a test
+export const VERSION = '2.12.0'; // this build; kept equal to package.json by a test
 export const touch = matchMedia('(pointer: coarse)').matches;
 
 export const S = {
@@ -21,18 +21,48 @@ export const cfg = () => S.machines[S.cur];
 export const saveMachines = () => { if (S.watch) return; store.set('machines', S.machines); store.set('cur', S.cur); }; // a watch link is never remembered
 
 export class Unauthorized extends Error {}
-export async function api(path, { method = 'GET', body, raw, m = cfg(), timeout = 15000 } = {}) {
+// A machine keeps the address it was added with (its identity: layouts and tabs hang off it) and, in m.url, the address
+// that answered last. Every connection refreshes m.alts with all the machine's addresses (LAN, Tailscale, hostname);
+// when the current one stops answering, they are all tried at once and the first to answer is used.
+export const origin = (m = cfg()) => m.url || m.base;
+export function learnAddrs(m, info) {
+  const u = new URL(m.base), port = u.protocol === 'http:' && info.port ? info.port : u.port;
+  const alts = [...(info.addrs || []), info.host].filter(Boolean).map((h) => `${u.protocol}//${h.includes(':') ? `[${h}]` : h}${port ? `:${port}` : ''}`);
+  m.alts = [...new Set([origin(m), ...alts])].filter((a) => a !== m.base); // the address in use stays, even if the server doesn't list it (a proxy, a DNS name)
+  saveMachines();
+}
+const probing = new Map();
+export function failover(m = cfg()) {
+  if (!probing.has(m)) probing.set(m, (async () => {
+    const tried = origin(m), cands = [...new Set([m.base, ...(m.alts || [])])].filter((a) => a !== tried);
+    const ok = await Promise.any(cands.map(async (a) => {
+      const r = await fetch(a + '/api/info', { headers: { authorization: 'Bearer ' + m.token }, signal: AbortSignal.timeout(4000) });
+      if (r.status !== 200 && r.status !== 401) throw new Error(); return a;
+    })).catch(() => null);
+    if (ok) { m.url = ok === m.base ? undefined : ok; saveMachines(); }
+    return ok;
+  })().finally(() => probing.delete(m)));
+  return probing.get(m);
+}
+export async function api(path, opts = {}, again = true) {
+  const m = opts.m || cfg();
+  try { return await call(path, { ...opts, m }); } catch (e) {
+    if (again && !(e instanceof Unauthorized) && !e.status && await failover(m)) return api(path, { ...opts, m }, false); // network error: try its other addresses
+    throw e;
+  }
+}
+async function call(path, { method = 'GET', body, raw, m, timeout = 15000 }) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeout);
   try {
-    const r = await fetch(m.base + path, {
+    const r = await fetch(origin(m) + path, {
       method, signal: ctl.signal,
       headers: { authorization: 'Bearer ' + m.token, ...(body !== undefined && !raw ? { 'content-type': 'application/json' } : {}) },
       body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
     });
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) throw new Unauthorized('The token was rejected. Paste a fresh link from the server.');
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status });
     return j;
   } finally { clearTimeout(t); }
 }
@@ -218,7 +248,7 @@ export async function openPort(port) {
   const tab = native ? null : window.open('', '_blank'); // open now, while the tap still counts, or the popup is blocked
   try {
     const f = await api(`/api/ports/${port}/open`, { method: 'POST' });
-    const u = new URL(cfg().base), url = `${u.protocol}//${u.hostname}:${f.port}/?tl=${encodeURIComponent(f.key)}`;
+    const u = new URL(origin()), url = `${u.protocol}//${u.hostname}:${f.port}/?tl=${encodeURIComponent(f.key)}`;
     if (tab) tab.location = url; else window.open(url, '_blank');
   } catch (e) { tab?.close(); toast(e.message, true); }
 }

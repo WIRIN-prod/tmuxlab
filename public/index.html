@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#0A1220">
+<meta name="theme-color" content="#09090b">
 <title>tmuxlab</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -47,6 +47,7 @@
     <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
     <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></symbol>
     <symbol id="i-snippet" viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
@@ -134,6 +135,12 @@
   <p id="noresults" class="empty muted" hidden>No sessions match your search.</p>
   </div>
   <button class="fab" id="fab" aria-label="New session"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
+  <nav class="dock" id="dock" aria-label="Main">
+    <button type="button" data-dock="all" aria-current="true"><svg class="ico" aria-hidden="true"><use href="#i-terminal"/></svg>Sessions</button>
+    <button type="button" data-dock="waiting"><svg class="ico" aria-hidden="true"><use href="#i-bell"/></svg>Needs you<span class="badge" id="dock-n"></span></button>
+    <button type="button" data-dock="jump"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>Jump to</button>
+    <button type="button" data-dock="more" aria-controls="nav"><svg class="ico" aria-hidden="true"><use href="#i-menu"/></svg>More</button>
+  </nav>
 </section>
 
 <!-- terminal -->
@@ -309,6 +316,7 @@
     </div>
     <div data-pane="look" class="pane" hidden>
       <div class="grid2">
+        <label>Appearance<select id="set-ui"><option value="dark">Dark</option><option value="light">Light</option><option value="auto">Match system</option></select></label>
         <label>Terminal theme<select id="set-theme"></select></label>
         <label>Text size<input type="number" id="set-font" min="8" max="28"></label>
       </div>

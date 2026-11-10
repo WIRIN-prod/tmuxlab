@@ -1,5 +1,5 @@
 // Boot: connect to the current machine, then poll.
-import { $, esc, S, api, act, toast, cfg, saveMachines, show, isApp, Unauthorized, busy, VERSION } from './core.js';
+import { $, esc, S, api, act, toast, cfg, saveMachines, learnAddrs, origin, show, isApp, Unauthorized, busy, VERSION } from './core.js';
 import { refresh, refreshPreviews, refreshStats } from './wall.js';
 import { closeTerm, openTerm } from './term.js';
 import './sheets.js';
@@ -114,7 +114,7 @@ function offerUpdate(info) {
   $('#update').hidden = !on;
   if (on) $('#up-title').textContent = `tmuxlab ${info.apk} is ready (you have ${VERSION})`;
 }
-$('#up-go').addEventListener('click', () => window.open(cfg().base + '/tmuxlab.apk', '_blank'));
+$('#up-go').addEventListener('click', () => window.open(origin() + '/tmuxlab.apk', '_blank'));
 // reopening the app resumes it rather than restarting it, so check again whenever it comes back
 document.addEventListener('visibilitychange', () => { if (isApp && !document.hidden && cfg()) api('/api/info').then(offerUpdate, () => {}); });
 
@@ -145,13 +145,14 @@ export async function start() {
   $('#grid').replaceChildren();
   try {
     const info = await api('/api/info');
+    learnAddrs(cfg(), info);
     const get = (p) => info.role === 'view' ? [] : api(p).catch(() => []); // watch links can't read config; older servers lack projects/snippets
     const [presets, stacks, projects, snippets] = await Promise.all(['/api/config/presets', '/api/config/stacks', '/api/config/projects', '/api/config/snippets'].map(get));
     Object.assign(S, { info, presets, stacks, projects, snippets });
     await adoptDevice(info);
     document.title = `tmuxlab · ${cfg().name || info.host}`;
   } catch (e) {
-    return showLogin(e instanceof Unauthorized ? e.message : `Could not reach ${cfg().base}. Check the server is running.`, S.machines.length > 1);
+    return showLogin(e instanceof Unauthorized ? e.message : `Could not reach ${origin()}. Check the server is running.`, S.machines.length > 1);
   }
   if (S.info.role === 'view') { // watch link: just that session, nothing to change
     document.body.classList.add('viewer');
