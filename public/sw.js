@@ -1,5 +1,5 @@
 // Network first so updates show up immediately; cached shell only when the server is unreachable.
-const C = 'tmuxlab-v17';
+const C = 'tmuxlab-v18';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (e) => {

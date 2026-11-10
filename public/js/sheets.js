@@ -605,6 +605,7 @@ export async function openSettings(tab = 'alerts') {
   $('#set-theme').value = T.theme; $('#set-ui').value = document.documentElement.dataset.ui;
   $('#set-font').value = T.fontSize;
   $('#set-awake').checked = store.get('awake', touch);
+  $('#vol-row').hidden = !window.TmuxlabNative; $('#set-vol').checked = store.get('volScroll', true);
   setTab(tab);
   dSet.showModal();
   try {
@@ -658,7 +659,7 @@ $('#set-save').addEventListener('click', async () => {
     [S.presets, S.stacks, S.snippets] = await Promise.all([api('/api/config/presets', { method: 'PUT', body: presets }), api('/api/config/stacks', { method: 'PUT', body: stacks }),
       api('/api/config/snippets', { method: 'PUT', body: readSnips() })]);
     await saveAlerts();
-    setUi($('#set-ui').value); setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked);
+    setUi($('#set-ui').value); setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked); store.set('volScroll', $('#set-vol').checked); syncVolume();
     dSet.close(); toast('Settings saved');
   } catch (e) { $('#set-err').textContent = e.message; }
 });

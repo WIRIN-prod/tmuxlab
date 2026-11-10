@@ -1,6 +1,6 @@
 {
   "name": "tmuxlab",
-  "version": "2.12.0",
+  "version": "2.13.0",
   "description": "Run coding agents (Claude Code, Codex, …) in parallel in tmux and drive them from a browser or your phone",
   "private": true,
   "license": "MIT",

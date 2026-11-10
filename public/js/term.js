@@ -249,6 +249,7 @@ export function openTerm(name, w) {
       for (const [s, wi] of slots) addPane(s, s === name && w != null ? w : wi ?? undefined);
       setFocus(slots.findIndex(([s]) => s === name));
     } else addPane(name, w);
+    syncVolume();
     return focused()?.el;
   });
   keepAwake(true);
@@ -370,6 +371,7 @@ export function closeTerm() {
     T.panes = [];
     $('#term').hidden = true; $('#wall').hidden = false;
     document.body.classList.remove('rail');
+    syncVolume();
     return rowOf(name);
   });
   keepAwake(false);
@@ -738,6 +740,10 @@ document.documentElement.dataset.term = T.theme;
 export function setUi(v) { document.documentElement.dataset.ui = ['light', 'auto'].includes(v) ? v : 'dark'; store.set('ui', document.documentElement.dataset.ui); }
 document.documentElement.dataset.ui = store.get('ui', 'dark');
 
+// ---------- volume buttons (Android app): up and down scroll the terminal ----------
+// The app asks Android to hand the volume keys to the page only while a terminal is open and the setting is on.
+export const syncVolume = () => { try { window.TmuxlabNative?.setVolumeScroll(!$('#term').hidden && store.get('volScroll', true)); } catch {} };
+window.tlVolume = (dir) => { const p = focused(); if (p) queueScroll(p, (dir === 'up' ? -1 : 1) * Math.max(3, Math.floor(p.term.rows / 2))); };
 // ---------- scrolling and pinch zoom ----------
 // The server picks the right kind of scroll: tmux history for shells, wheel events for full-screen
 // apps with mouse support (Claude Code, codex), arrow keys for other full-screen apps (less, man).
@@ -757,7 +763,24 @@ function queueScroll(p, lines) {
 }
 function touchScroll(p) {
   let y0 = null, acc = 0, pinch = null, samples = [], fling = 0;
+  // Termius-style gestures: long-press then drag = arrow keys (further = faster, hold = repeat); long-press and let go =
+  // select the word (or a Paste menu on empty space); double-tap = Tab; three-finger tap = paste
+  let hold = null, press = null, tapAt = 0, three = 0, downAt = 0, moved = 0, x0 = 0, ty0 = 0;
   const el = $('.tbody', p.el);
+  el.addEventListener('contextmenu', (e) => { if (touch) e.preventDefault(); }); // a long-press is ours
+  const stopHold = () => { clearTimeout(press); press = null; if (hold) { clearInterval(hold.tick); hold = null; } };
+  const pasteClip = () => (navigator.clipboard?.readText ? navigator.clipboard.readText().then((t) => t && paste(t), () => toast('Allow clipboard access to paste', true))
+    : toast('Pasting from here needs https or the app', true));
+  function holdMenu(x, y) { // a word under the finger gets selected; the menu offers Copy and Paste
+    const t = p.term, b = $('.xterm-screen', p.el).getBoundingClientRect(), buf = t.buffer.active;
+    const col = Math.floor((x - b.left) / (b.width / t.cols)), row = Math.floor((y - b.top) / (b.height / t.rows)) + buf.viewportY;
+    const line = buf.getLine(row)?.translateToString(true) ?? '';
+    let a = col, z = col;
+    if (line[col] && /\S/.test(line[col])) { while (a > 0 && /\S/.test(line[a - 1])) a--; while (z < line.length - 1 && /\S/.test(line[z + 1])) z++; t.select(a, row, z - a + 1); }
+    const anchor = { getBoundingClientRect: () => ({ left: x, top: y, bottom: y }), setAttribute() {}, isConnected: false };
+    menu(anchor, [...(t.hasSelection() ? [{ label: 'Copy', run: () => { copyText(t.getSelection()); t.clearSelection(); } },
+      { label: 'Select line', run: () => t.selectLines(row, row) }] : []), { label: 'Paste', run: pasteClip }]);
+  }
   const cell = () => T.fontSize * 1.3;
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   const move = (dy) => { // finger down = back in history
@@ -768,11 +791,27 @@ function touchScroll(p) {
   // capture phase: we see the gesture even if xterm handles the touch itself
   const o = { passive: true, capture: true };
   el.addEventListener('touchstart', (e) => {
-    cancelAnimationFrame(fling);
-    if (e.touches.length === 2) { pinch = { d: dist(e.touches), size: T.fontSize }; y0 = null; }
-    else if (e.touches.length === 1) { y0 = e.touches[0].clientY; acc = 0; samples = [[performance.now(), y0]]; }
+    cancelAnimationFrame(fling); stopHold();
+    if (e.touches.length === 3) { three = performance.now(); y0 = null; pinch = null; return; }
+    if (e.touches.length === 2) { pinch = { d: dist(e.touches), size: T.fontSize }; y0 = null; three = 0; }
+    else if (e.touches.length === 1) {
+      y0 = ty0 = e.touches[0].clientY; x0 = e.touches[0].clientX; acc = 0; moved = 0; downAt = performance.now(); samples = [[downAt, y0]];
+      press = setTimeout(() => { // held still: from here the finger steers the cursor instead of scrolling
+        press = null; y0 = null; vibrate();
+        hold = { x: x0, y: ty0, cx: x0, cy: ty0, sent: false, last: 0 };
+        hold.tick = setInterval(() => {
+          const dx = hold.cx - hold.x, dy = hold.cy - hold.y, d = Math.hypot(dx, dy), now = performance.now();
+          if (d < 16 || now - hold.last < (d < 48 ? 260 : d < 96 ? 100 : 35)) return; // three gears
+          hold.last = now; hold.sent = true;
+          const k = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'C' : 'D') : (dy > 0 ? 'B' : 'A');
+          sendInput(`\x1b${p.term.modes.applicationCursorKeysMode ? 'O' : '['}${k}`); vibrate(4);
+        }, 30);
+      }, 450);
+    }
   }, o);
   el.addEventListener('touchmove', (e) => {
+    if (hold) { hold.cx = e.touches[0].clientX; hold.cy = e.touches[0].clientY; return; }
+    if (press && Math.hypot(e.touches[0].clientX - x0, e.touches[0].clientY - ty0) > 10) { clearTimeout(press); press = null; } // a drag, not a press
     if (pinch && e.touches.length === 2) {
       const n = Math.round(pinch.size * dist(e.touches) / pinch.d);
       if (n !== T.fontSize) setFont(n);
@@ -784,6 +823,13 @@ function touchScroll(p) {
     samples.push([performance.now(), y]); if (samples.length > 5) samples.shift();
   }, o);
   el.addEventListener('touchend', (e) => {
+    if (three && performance.now() - three < 600) { three = 0; vibrate(); pasteClip(); return; }
+    three = 0;
+    if (hold) { const h = hold; stopHold(); if (!h.sent) setTimeout(() => holdMenu(h.cx, h.cy), 120); return; } // after the browser's own mouse events, which clear a selection
+    if (press) { // a quick tap: two in a row send Tab
+      stopHold(); const now = performance.now();
+      if (now - downAt < 250 && !e.touches.length) { if (now - tapAt < 320) { tapAt = 0; sendInput('\t'); vibrate(); } else tapAt = now; }
+    }
     if (e.touches.length < 2) pinch = null;
     if (e.touches.length || y0 == null) return;
     y0 = null;
