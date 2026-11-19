@@ -7,7 +7,7 @@ export const store = {
   set(k, v) { try { localStorage.setItem('tl.' + k, JSON.stringify(v)); } catch {} },
 };
 export const isApp = !!window.Capacitor?.isNativePlatform?.();
-export const VERSION = '2.13.0'; // this build; kept equal to package.json by a test
+export const VERSION = '2.14.0'; // this build; kept equal to package.json by a test
 export const touch = matchMedia('(pointer: coarse)').matches;
 
 export const S = {
@@ -73,11 +73,13 @@ export const W = (s, i) => `/api/windows/${encodeURIComponent(s)}/${i}`;
 export const icon = (n, cls = 'ico') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
 // toasts are polite (never take focus), dismissable, and stay longer when they carry an action
-export function toast(msg, bad, { action, run } = {}) {
+export function toast(msg, bad, { action, run, kind, title } = {}) {
   const t = document.createElement('div');
-  t.className = 'toast' + (bad ? ' bad' : '');
+  t.className = 'toast' + (bad ? ' bad' : '') + (kind ? ` ${kind}` : '');
   if (bad) t.setAttribute('role', 'alert'); // the container is already a polite live region
-  const span = document.createElement('span'); span.textContent = msg; t.append(span);
+  const span = document.createElement('span');
+  if (title) { const b = document.createElement('b'); b.textContent = title; span.append(b, document.createElement('br')); }
+  span.append(msg); t.append(span);
   const gone = () => { t.classList.add('out'); setTimeout(() => t.remove(), 140); };
   if (action) {
     const b = document.createElement('button');
@@ -89,7 +91,7 @@ export function toast(msg, bad, { action, run } = {}) {
   x.className = 'btn sm ghost icon'; x.setAttribute('aria-label', 'Dismiss'); x.innerHTML = icon('x'); x.onclick = gone;
   t.append(x);
   $('#toasts').append(t);
-  setTimeout(gone, action ? 8000 : bad ? 6000 : 3000);
+  setTimeout(gone, kind === 'ask' ? 15000 : action ? 8000 : bad ? 6000 : 3000);
 }
 
 export function show(id) { for (const v of $$('.view')) v.hidden = v.id !== id; }

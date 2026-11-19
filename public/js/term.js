@@ -1,4 +1,5 @@
 // Terminal view: one or more terminal panes (split view), each attached through its own tmux view session.
+import { allAgents as everyAgent, jumpTo } from './notify.js';
 import { $, $$, esc, S, api, act, W, toast, store, touch, home, winState, activeWin, activePane, findSess, menu, presetItems, vibrate, cfg, origin, failover, ask, afterNav, onBack, NAME_RULE, whereHtml, whereText, icon, openPort, ago } from './core.js';
 import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent, openPalette } from './sheets.js';
@@ -130,7 +131,7 @@ class Pane {
     const u = new URL('/ws', origin());
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     const w = this.wIdx ?? this.w0; // the old view is gone after a disconnect, so remember the window
-    u.search = new URLSearchParams({ s: this.s, token: cfg().token, cols: this.term.cols, rows: this.term.rows, ...(w != null ? { w } : {}) });
+    u.search = new URLSearchParams({ s: this.s, token: cfg().token, cols: this.term.cols, rows: this.term.rows, ...(w != null ? { w } : {}), ...(store.get('tmuxStatus', false) ? { status: 1 } : {}) });
     this.setConn('wait');
     const ws = this.ws = new WebSocket(u);
     ws.onopen = () => { this.retry = 0; this.setConn('ok'); this.ctl({ t: 'resize', cols: this.term.cols, rows: this.term.rows }); };
@@ -187,14 +188,79 @@ function layout() {
   g.dataset.arr = T.arr || 'main';
   g.classList.toggle('zoom', !!T.zoom);
   // remembered, so leaving the terminal and coming back (or reloading) brings the same views back
-  if (T.panes.length && !$('#term').hidden) store.set(layoutKey(), { slots: T.panes.map((p) => [p.s, p.win?.index ?? p.w0 ?? null]), arr: T.arr || 'main' });
+  if (T.panes.length && !$('#term').hidden) store.set(layoutKey(), { slots: T.panes.map((p) => [p.s, p.win?.index ?? p.w0 ?? null]), arr: T.arr || 'main', sizes: T.sizes || {} });
   for (const [i, p] of T.panes.entries()) {
     p.el.classList.toggle('focus', i === T.focus && T.panes.length > 1);
     $('.tph', p.el).hidden = T.panes.length < 2;
   }
-  requestAnimationFrame(() => T.panes.forEach((p) => { try { p.fit.fit(); } catch {} }));
+  applySizes();
+  requestAnimationFrame(() => { g.style.setProperty('--wbar-h', `${$("#t-wbar").offsetHeight}px`); renderGutters(); T.panes.forEach((p) => { try { p.fit.fit(); } catch {} }); });
   $('#btn-split').setAttribute('aria-label', T.panes.length > 1 ? `Layout: ${T.panes.length} views` : 'Layout');
 }
+// ---------- drag the borders between views to resize them ----------
+// Sizes are fractions of the grid (the edges between columns, and between rows), remembered per layout.
+const stacked = () => matchMedia('(max-width: 900px) and (orientation: portrait)').matches; // phones stack the views: nothing to drag
+function gridShape() {
+  const n = T.panes.length; if (T.zoom || n < 2 || stacked()) return null;
+  if (n === 2) return { key: '2', cols: 2, rows: 1 };
+  if (n === 3 && T.arr === 'cols') return { key: '3c', cols: 3, rows: 1 };
+  if (n === 3) return { key: '3m', cols: 2, rows: 2, h: 'right' };
+  return { key: '4', cols: 2, rows: 2, h: 'all' };
+}
+const sizesOf = (sh) => (T.sizes ||= {})[sh.key] ||= { x: sh.cols === 3 ? [1 / 3, 2 / 3] : [0.5], y: 0.5 };
+function applySizes() {
+  const g = $('#terms'), sh = gridShape(), z = sh && T.sizes?.[sh.key];
+  const fr = (edges) => [edges[0], ...edges.slice(1).map((e, i) => e - edges[i]), 1 - edges.at(-1)].map((v) => `${v.toFixed(4)}fr`).join(' ');
+  g.style.gridTemplateColumns = z ? fr(z.x) : '';
+  g.style.gridTemplateRows = z && sh.rows === 2 ? fr([z.y]) : '';
+}
+function renderGutters() {
+  const g = $('#terms'), keep = new Set(), sh = gridShape();
+  if (!sh) { for (const x of $$('.gutter', g)) x.remove(); return; }
+  const z = sizesOf(sh), tr = g.getBoundingClientRect(), r = (p) => { const b = p.el.getBoundingClientRect(); return { l: b.left - tr.left, t: b.top - tr.top, w: b.width, h: b.height, r: b.right - tr.left, b: b.bottom - tr.top }; };
+  const P = T.panes.map(r), mk = (dir, i, style) => { // reused while dragging, or the pointer would let go of it
+    let d = g.querySelector(`.gutter[data-dir="${dir}"][data-i="${i}"]`); keep.add(`${dir}${i}`);
+    if (!d) {
+      d = document.createElement('div'); d.className = `gutter ${dir}`; d.dataset.dir = dir; d.dataset.i = i; d.tabIndex = 0;
+      d.setAttribute('role', 'separator'); d.setAttribute('aria-orientation', dir === 'v' ? 'vertical' : 'horizontal');
+      d.setAttribute('aria-label', dir === 'v' ? 'Resize views: drag, or use the left and right arrows' : 'Resize views: drag, or use the up and down arrows');
+      g.append(d);
+    }
+    Object.assign(d.style, { left: '', top: '', width: '', height: '', ...style });
+  };
+  const col = (k) => (sh.cols === 3 ? P[k] : P[k === 0 ? 0 : 1]); // the pane that starts column k
+  for (let k = 0; k < sh.cols - 1; k++) mk('v', k, { left: `${(col(k).r + col(k + 1).l) / 2 - 5}px`, top: '0', height: `${tr.height}px` });
+  if (sh.h === 'right') mk('h', 0, { left: `${P[1].l}px`, width: `${P[1].w}px`, top: `${(P[1].b + P[2].t) / 2 - 5}px` });
+  if (sh.h === 'all') mk('h', 0, { left: '0', width: `${tr.width}px`, top: `${(P[0].b + P[2].t) / 2 - 5}px` });
+  for (const x of $$('.gutter', g)) if (!keep.has(`${x.dataset.dir}${x.dataset.i}`)) x.remove();
+}
+let drag = null;
+$('#terms').addEventListener('pointerdown', (e) => {
+  const d = e.target.closest('.gutter'); if (!d) return;
+  e.preventDefault(); d.setPointerCapture(e.pointerId); drag = { d, tr: $('#terms').getBoundingClientRect(), sh: gridShape() };
+  document.body.classList.add('resizing'); d.classList.add('on');
+});
+$('#terms').addEventListener('pointermove', (e) => {
+  if (!drag || !drag.sh) return;
+  const { d, tr, sh } = drag, z = sizesOf(sh), i = +d.dataset.i, min = 0.12;
+  if (d.dataset.dir === 'v') { const f = (e.clientX - tr.left) / tr.width; z.x[i] = Math.min((z.x[i + 1] ?? 1) - min, Math.max((z.x[i - 1] ?? 0) + min, f)); }
+  else z.y = Math.min(1 - min, Math.max(min, (e.clientY - tr.top) / tr.height));
+  applySizes(); renderGutters();
+  cancelAnimationFrame(drag.raf); drag.raf = requestAnimationFrame(() => T.panes.forEach((p) => { try { p.fit.fit(); } catch {} }));
+});
+const endDrag = () => { if (!drag) return; drag = null; document.body.classList.remove('resizing'); layout(); };
+$('#terms').addEventListener('pointerup', endDrag); $('#terms').addEventListener('pointercancel', endDrag);
+$('#terms').addEventListener('lostpointercapture', endDrag);
+// double-click puts the views back to equal; the arrow keys nudge a focused border
+$('#terms').addEventListener('dblclick', (e) => { if (!e.target.closest('.gutter')) return; const sh = gridShape(); if (sh) { delete T.sizes[sh.key]; applySizes(); layout(); } });
+$('#terms').addEventListener('keydown', (e) => {
+  const d = e.target.closest?.('.gutter'); if (!d) return; const sh = gridShape(); if (!sh) return;
+  const step = { ArrowLeft: -0.02, ArrowUp: -0.02, ArrowRight: 0.02, ArrowDown: 0.02 }[e.key]; if (!step || (d.dataset.dir === 'v') !== /Left|Right/.test(e.key)) return;
+  e.preventDefault(); const z = sizesOf(sh), i = +d.dataset.i;
+  if (d.dataset.dir === 'v') z.x[i] = Math.min((z.x[i + 1] ?? 1) - 0.12, Math.max((z.x[i - 1] ?? 0) + 0.12, z.x[i] + step)); else z.y = Math.min(0.88, Math.max(0.12, z.y + step));
+  applySizes(); layout(); setTimeout(() => $('#terms').querySelector(`.gutter[data-dir="${d.dataset.dir}"][data-i="${i}"]`)?.focus(), 60);
+});
+addEventListener('resize', () => { if (T.panes.length > 1) { applySizes(); requestAnimationFrame(renderGutters); } });
 const canSplit = () => !(touch && innerWidth < 768);
 $('#t-where').addEventListener('click', (e) => { if (T.panes.length > 1) slotMenu(focused(), e.currentTarget); else if (narrow()) openPalette(); });
 const narrow = () => innerWidth < 700;
@@ -244,7 +310,7 @@ export function openTerm(name, w) {
     $('#wall').hidden = true; $('#term').hidden = false;
     const saved = store.get(layoutKey(), null);
     const slots = (saved?.slots || []).filter(([s]) => findSess(s)).slice(0, MAX_PANES);
-    T.arr = saved?.arr || 'main';
+    T.arr = saved?.arr || 'main'; T.sizes = saved?.sizes || {};
     if (slots.length > 1 && canSplit() && slots.some(([s]) => s === name)) {
       for (const [s, wi] of slots) addPane(s, s === name && w != null ? w : wi ?? undefined);
       setFocus(slots.findIndex(([s]) => s === name));
@@ -338,9 +404,11 @@ $('#btn-opensess').addEventListener('click', (e) => {
     { label: 'New session…', icon: 'plus', run: () => openNew() }]);
 });
 // Alt+1..9 jumps to a tab; Alt+[ / Alt+] steps through them
+// the sessions in the order the Agents panel lists them (it replaces the tabs while open, so the shortcuts follow it)
+const panelOrder = () => [...new Set([...allAgents().map((a) => a.s.name), ...S.sessions.filter((s) => !s.windows.some((w) => (w.panes || []).some((p) => p.agent))).map((s) => s.name).sort((a, b) => a.localeCompare(b))])];
 addEventListener('keydown', (e) => {
   if ($('#term').hidden || !e.altKey || e.ctrlKey || e.metaKey) return;
-  const l = openTabs(), i = l.indexOf(focused()?.s);
+  const l = document.body.classList.contains('rail') ? panelOrder() : openTabs(), i = l.indexOf(focused()?.s);
   const to = /^Digit[1-9]$/.test(e.code) ? l[+e.code.slice(5) - 1] : e.code === 'BracketRight' ? l[(i + 1) % l.length] : e.code === 'BracketLeft' ? l[(i - 1 + l.length) % l.length] : null;
   if (to) { e.preventDefault(); e.stopPropagation(); switchTo(to); }
 }, true);
@@ -421,7 +489,8 @@ const agentsOpen = () => wide.matches ? store.get('agentsPanel', true) : $('#btn
 function allAgents() {
   const out = [];
   for (const s of S.sessions) for (const w of s.windows) for (const p of w.panes || []) if (p.agent) out.push({ s, w, p, ...p.agent });
-  return out.sort((a, b) => a.s.name.localeCompare(b.s.name) || a.w.index - b.w.index || a.p.index - b.p.index);
+  // pinned first, then a fixed order (never by activity): rows must not jump under the finger
+  return out.sort((a, b) => (+!!b.p.pinned) - (+!!a.p.pinned) || a.s.name.localeCompare(b.s.name) || a.w.index - b.w.index || a.p.index - b.p.index);
 }
 function renderAgents() {
   const list = allAgents(), cur = focused();
@@ -435,14 +504,19 @@ function renderAgents() {
   // with three or more views the panel folds to its state dots, so the terminals keep their width
   $('#t-agents').classList.toggle('mini', wide.matches && T.panes.length >= 3);
   if (!show) return;
-  const sig = JSON.stringify([list.map((a) => [a.p.id, a.state, a.p.prompt?.question, a.p.status?.last, a.w.name]), shells.map((s) => [s.name, s.windows.some((w) => w.running)]), cur?.s, cur?.win?.index, T.panes.map((p) => p.s), T.panes.length >= 3]);
+  const others = everyAgent().filter((a) => a.i !== S.cur);
+  $('#t-crumb').textContent = cur ? `${S.machines.length > 1 ? `${cfg().name || new URL(cfg().base).host} › ` : ''}${cur.s}${cur.win && cur.s && S.sessions.find((x) => x.name === cur.s)?.windows.length > 1 ? ` › ${cur.win.name}` : ''}` : '';
+  const sig = JSON.stringify([others.map((a) => [a.i, a.s.name, a.state]), list.map((a) => [a.p.id, a.state, a.p.pinned, a.p.prompt?.question, a.p.status?.last, a.w.name]), shells.map((s) => [s.name, s.windows.some((w) => w.running)]), cur?.s, cur?.win?.index, T.panes.map((p) => p.s), T.panes.length >= 3]);
   if ($('#t-agents').dataset.sig === sig) return;
   $('#t-agents').dataset.sig = sig;
-  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li><button draggable="true" class="ag ag-${a.state} ${T.panes.some((x) => x.s === a.s.name) ? 'shown' : ''}" title="${esc(`${a.agent} ${a.s.name}: ${AG_LABEL[a.state]}`)}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
+  $('#t-agents').innerHTML = `<h2 class="small muted">Agents</h2><ul>${list.map((a) => `<li class="agli"><button draggable="true" class="ag ag-${a.state} ${T.panes.some((x) => x.s === a.s.name) ? 'shown' : ''}" title="${esc(`${a.agent} ${a.s.name}: ${AG_LABEL[a.state]}`)}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}"
     aria-current="${cur?.s === a.s.name && cur?.win?.index === a.w.index}">
-    <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}${a.s.windows.length > 1 ? ` › ${esc(a.w.name)}` : ''}</span></span>
+    <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}${a.s.windows.length > 1 ? ` › ${esc(a.w.name)}` : ''}</span>${a.p.pinned ? icon('pin', 'ico pin') : ''}</span>
     <span class="ag-st">${AG_LABEL[a.state]} · ${ago(a.since / 1000)}</span>
-    ${a.p.prompt?.question || a.p.status?.last ? `<span class="ag-l">${esc(a.p.prompt?.question || a.p.status.last)}</span>` : ''}</button></li>`).join('')}</ul>
+    ${a.p.prompt?.question || a.p.status?.last ? `<span class="ag-l">${esc(a.p.prompt?.question || a.p.status.last)}</span>` : ''}</button><button class="ag-more" aria-haspopup="menu" aria-label="Actions for ${esc(a.agent)} ${esc(a.s.name)}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}">${icon('more')}</button></li>`).join('')}</ul>
+    ${others.length ? `<h2 class="small muted">On other machines</h2><ul>${others.map((a) => `<li class="agli"><button class="ag ag-${a.state}" data-m="${a.i}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}" title="${esc(`${a.agent} ${a.s.name} on ${a.m.name || new URL(a.m.base).host}`)}">
+      <span class="dot"></span><span class="ag-t"><b>${esc(a.agent)}</b> <span class="muted">${esc(a.s.name)}</span></span>
+      <span class="ag-st">${AG_LABEL[a.state]} · ${esc(a.m.name || new URL(a.m.base).host)}</span></button></li>`).join('')}</ul>` : ''}
     ${shells.length ? `<h2 class="small muted">Other sessions</h2><ul>${shells.map((s) => { const w = activeWin(s); return `<li><button draggable="true" class="ag ag-shell ${T.panes.some((x) => x.s === s.name) ? 'shown' : ''}" title="${esc(s.name)}" data-s="${esc(s.name)}" data-w="${w.index}" data-p="${activePane(w).index}" aria-current="${cur?.s === s.name}">
     <span class="dot ${s.windows.some((x) => x.running) ? 'run' : ''}"></span><span class="ag-t"><b>${esc(s.name)}</b> <span class="muted">${esc(activePane(w).cmd || 'shell')}</span></span></button></li>`; }).join('')}</ul>` : ''}`;
 }
@@ -458,14 +532,31 @@ $('#btn-agents').addEventListener('click', () => {
 let agentsBack = null;
 function closeAgents() { agentsBack = null; $('#btn-agents').setAttribute('aria-expanded', 'false'); $('#t-agents').hidden = true; layout(); }
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && agentsBack && !wide.matches && !document.querySelector('dialog[open], .menu')) { e.preventDefault(); agentsBack(); closeAgents(); } }, true); // capture: xterm swallows Esc
+// right-click (or the ⋯ on a row): open, open beside, pin, mark unread
+function agentMenu(anchor, b) {
+  const a = allAgents().find((x) => x.s.name === b.dataset.s && x.w.index === +b.dataset.w && x.p.index === +b.dataset.p);
+  const t = `${W(b.dataset.s, `${b.dataset.w}.${b.dataset.p}`)}`;
+  if (!a) return;
+  menu(anchor, [
+    { label: 'Open', icon: 'terminal', run: () => $(`#t-agents .ag[data-s="${CSS.escape(b.dataset.s)}"][data-w="${b.dataset.w}"][data-p="${b.dataset.p}"]`)?.click() },
+    { label: 'Open beside', icon: 'columns', disabled: !T.panes.length || T.panes.length >= MAX_PANES || !canSplit() || T.panes.some((x) => x.s === a.s.name), run: () => addPane(a.s.name, a.w.index) },
+    '-',
+    { label: a.p.pinned ? 'Unpin' : 'Pin to the top', icon: 'pin', run: async () => { await act(`${t}/pin`, { pinned: !a.p.pinned }); refresh(); } },
+    { label: 'Mark as unread', icon: 'bell', disabled: a.state !== 'idle', sub: a.state === 'idle' ? '' : 'only for a finished agent', run: async () => { await act(`${t}/unread`); refresh(); } },
+  ]);
+}
+$('#t-agents').addEventListener('contextmenu', (e) => { const b = e.target.closest('.ag'); if (!b) return; e.preventDefault(); agentMenu(b, b); });
 $('#t-agents').addEventListener('click', async (e) => {
+  const m = e.target.closest('.ag-more'); if (m) return agentMenu(m, m);
   const b = e.target.closest('.ag'); if (!b) return;
+  if (b.dataset.m !== undefined) return jumpTo(S.machines[+b.dataset.m], b.dataset.s, +b.dataset.w, +b.dataset.p); // an agent on another machine
   if (!wide.matches && agentsBack) { agentsBack(); closeAgents(); }
   await act(`${W(b.dataset.s, `${b.dataset.w}.${b.dataset.p}`)}/select`).catch(() => {}); // land on the agent's pane, not just its window
   if ($('#term').hidden || !T.panes.length) openTerm(b.dataset.s, +b.dataset.w); else { addTab(b.dataset.s); switchTo(b.dataset.s, +b.dataset.w, !wide.matches); }
   refresh();
 });
 wide.addEventListener('change', () => { $('#t-agents').dataset.sig = ''; renderAgents(); });
+document.addEventListener('tl-remote', () => { if (!$('#term').hidden) renderAgents(); });
 
 export function renderTermBar() {
   renderAgents();
@@ -633,6 +724,7 @@ $('#w-more').addEventListener('click', (e) => {
   const a = e.currentTarget, click = (id) => () => $(id).click();
   menu(a, [
     ...(!$('#w-restart').hidden ? [{ label: 'Restart', icon: 'refresh', run: click('#w-restart') }] : []),
+    ...(!$('#w-changes').hidden ? [{ label: 'Changes…', icon: 'diff', run: click('#w-changes') }] : []),
     { label: 'Panes…', icon: 'columns', run: () => setTimeout(() => panesMenu(a), 0) },
     { label: 'Snippets…', icon: 'terminal', run: () => setTimeout(() => snippets(a), 0) },
     { label: 'Attach a file', icon: 'plus', run: click('#attach') },

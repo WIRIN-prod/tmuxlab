@@ -1,5 +1,6 @@
 // Dialogs: new session, changes, schedules, settings, find & copy, jump palette.
 import { $, $$, esc, S, api, act, W, toast, store, busy, home, winState, activeWin, activePane, findSess, cfg, saveMachines, touch, ask, whereText, icon, presetIcon, ago } from './core.js';
+import { canNotify, allowSystemNotifications } from './notify.js';
 import { refresh } from './wall.js';
 import { openTerm, addPane, setFont, setTheme, setUi, T, THEMES } from './term.js';
 import { start } from './main.js';
@@ -605,7 +606,8 @@ export async function openSettings(tab = 'alerts') {
   $('#set-theme').value = T.theme; $('#set-ui').value = document.documentElement.dataset.ui;
   $('#set-font').value = T.fontSize;
   $('#set-awake').checked = store.get('awake', touch);
-  $('#vol-row').hidden = !window.TmuxlabNative; $('#set-vol').checked = store.get('volScroll', true);
+  $('#set-tmuxstatus').checked = store.get('tmuxStatus', false); $('#set-notify').checked = store.get('notify', true); $('#set-sound').checked = store.get('notifySound', true);
+  $('#set-notify-note').textContent = canNotify() ? (Notification.permission === 'denied' ? '(blocked by the browser: allow notifications for this site)' : '') : '(on-screen alerts only in this app)'; $('#vol-row').hidden = !window.TmuxlabNative; $('#set-vol').checked = store.get('volScroll', true);
   setTab(tab);
   dSet.showModal();
   try {
@@ -659,7 +661,7 @@ $('#set-save').addEventListener('click', async () => {
     [S.presets, S.stacks, S.snippets] = await Promise.all([api('/api/config/presets', { method: 'PUT', body: presets }), api('/api/config/stacks', { method: 'PUT', body: stacks }),
       api('/api/config/snippets', { method: 'PUT', body: readSnips() })]);
     await saveAlerts();
-    setUi($('#set-ui').value); setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked); store.set('volScroll', $('#set-vol').checked); syncVolume();
+    setUi($('#set-ui').value); setTheme($('#set-theme').value); setFont(+$('#set-font').value); store.set('awake', $('#set-awake').checked); store.set('volScroll', $('#set-vol').checked); store.set('tmuxStatus', $('#set-tmuxstatus').checked); store.set('notify', $('#set-notify').checked); store.set('notifySound', $('#set-sound').checked); if ($('#set-notify').checked) allowSystemNotifications(); syncVolume();
     dSet.close(); toast('Settings saved');
   } catch (e) { $('#set-err').textContent = e.message; }
 });

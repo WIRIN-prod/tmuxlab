@@ -18,7 +18,7 @@ import * as rs from './lib/restore.js';
 import * as logs from './lib/logs.js';
 const { setMaster } = auth;
 import { parseCron, nextRun } from './lib/cron.js';
-import { startWatcher, prompts, status, agentState, lastRuns, notify, answerToken } from './lib/watch.js';
+import { startWatcher, prompts, status, agentState, unread, lastRuns, notify, answerToken } from './lib/watch.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 7681);
@@ -46,7 +46,7 @@ async function listSessions() {
   return shape(rows, (r) => {
     const g = repos.get(r.pane_current_path);
         const agent = agentState.get(r.pane_id) || null;
-    return { ...(agent && { cmd: agent.agent, running: true }), prompt: prompts.get(r.pane_id) || null, status: status.get(r.pane_id) || null, agent, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
+    return { pinned: r['@tl_pin'] === '1', ...(agent && { cmd: agent.agent, running: true }), prompt: prompts.get(r.pane_id) || null, status: status.get(r.pane_id) || null, agent, branch: g?.branch || '', repo: g?.repo || '', wt: g?.wt || '' };
   }).list;
 }
 
@@ -135,6 +135,15 @@ const routes = [
   ['POST', r(`${W}/rename`), async ([s, w], b) => {
     if (typeof b.to !== 'string' || !b.to || b.to.length > 64) throw httpErr(400, 'bad name');
     await tmux('rename-window', '-t', tgt(s, w.split('.')[0]), b.to); return {};
+  }],
+  // pin an agent to the top of the Agents list (kept on the pane, so every device sees it), or mark its finished work unread
+  ['POST', r(`${W}/pin`), async ([s, w], b) => {
+    const t = tgt(s, w.includes('.') ? w : `${w}`);
+    if (b.pinned) await tmux('set-option', '-p', '-t', t, '@tl_pin', '1'); else await tmux('set-option', '-p', '-u', '-t', t, '@tl_pin').catch(() => {});
+    return {};
+  }],
+  ['POST', r(`${W}/unread`), async ([s, w]) => {
+    unread.add((await tmux('display-message', '-p', '-t', tgt(s, w), '#{pane_id}')).trim()); return {};
   }],
   ['POST', r(`${W}/move`), async ([s, w], b) => {
     await tmux('swap-window', '-d', '-s', tgt(s, w.split('.')[0]), '-t', tgt(s, String(b.to | 0))); return {};
@@ -386,6 +395,8 @@ async function attach(ws, s, q, readOnly = false) {
   const view = `${s}~tl${crypto.randomBytes(4).toString('hex')}`;
   try { await tmux('new-session', '-d', '-t', `=${s}`, '-s', view, '-x', String(cols), '-y', String(rows)); }
   catch { ws.close(4404, 'no such session'); return; }
+  // herdr-style clean panes: the page has its own title and tabs, so tmux's status bar stays hidden unless asked for
+  if (q.get('status') !== '1') await tmux('set-option', '-t', `=${view}:`, 'status', 'off').catch(() => {});
   // show the real session name in the status bar, not the internal view name
   const left = await tmux('show-options', '-gv', 'status-left').catch(() => '');
   if (left.includes('#S') || left.includes('#{session_name}')) {

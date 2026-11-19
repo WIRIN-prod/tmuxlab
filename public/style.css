@@ -810,10 +810,10 @@ dialog::backdrop, .scrim { background: var(--scrim); backdrop-filter: blur(4px);
 .vhead .wbar .btn.icon { width: 30px; padding: 0; }
 @media (pointer: coarse) { .vhead .wbar .btn.sm { min-height: 44px; } .vhead .wbar .btn.icon { width: 44px; } }
 .wbar .ov { display: none; }
-@container view (min-width: 900px) {
-  .wbar .ov { display: inline-flex; }
-  .wbar .sep.ov { display: block; }
-  #w-more { display: none; }
+/* the common tools show as icons once there is room; everything else lives in the ⋯ menu at every width */
+@container view (min-width: 600px) {
+  .wbar .ov.keep { display: inline-flex; }
+  .wbar .sep.ov.keep { display: block; }
 }
 .wbar .sep { background: var(--line); }
 .vhead .pchips { background: var(--surface); border-bottom-color: var(--line); }
@@ -917,3 +917,78 @@ body.rail #t-stabs { visibility: hidden; }
 ::view-transition-group(sess) { animation-duration: 260ms; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; }
 ::view-transition-old(sess), ::view-transition-new(sess) { height: 100%; object-fit: cover; object-position: top left; }
+
+/* Agents panel rows: a ⋯ that appears on hover or focus, a pin glyph for pinned agents */
+.agli { position: relative; }
+.ag-more { position: absolute; top: 6px; right: 4px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--r-sm); background: transparent; color: var(--muted); opacity: 0; }
+.agli:hover .ag-more, .ag-more:focus-visible, .agli:focus-within .ag-more { opacity: 1; }
+.ag-more:hover { background: var(--surface-3); color: var(--text); }
+@media (pointer: coarse) { .ag-more { opacity: 1; width: 36px; height: 36px; top: 4px; } }
+.ag .pin { width: 12px; height: 12px; margin-left: 4px; vertical-align: -1px; color: var(--faint); }
+.agents.mini .ag-more { display: none; }
+
+/* even rows and aligned edges */
+.card.srow { min-height: 64px; }
+.srow-m { min-height: 64px; }
+.nav-foot { padding: 12px 10px 4px 14px; font-size: 12px; }
+.nav-foot .machine { gap: 4px 14px; }
+.nav .nav-item.mach { padding-right: 8px; }
+.nav-foot .machine { flex-wrap: nowrap; gap: 0 12px; }
+
+/* narrow: the session name gets the room; the branch button moves into ⋯ */
+@container view (max-width: 520px) { #w-changes { display: none; } .vhead .wbar .where { min-width: 96px; } }
+
+/* drag the borders between views */
+#terms { position: relative; }
+.gutter { position: absolute; z-index: 5; touch-action: none; }
+.gutter.v { width: 10px; cursor: col-resize; }
+.gutter.h { height: 10px; cursor: row-resize; }
+.gutter::after { content: ''; position: absolute; background: transparent; border-radius: 2px; transition: background var(--t-fast, 120ms); }
+.gutter.v::after { left: 4px; top: 0; bottom: 0; width: 2px; }
+.gutter.h::after { top: 4px; left: 0; right: 0; height: 2px; }
+.gutter:hover::after, .gutter:focus-visible::after, .gutter.on::after { background: var(--primary); }
+body.resizing { user-select: none; cursor: col-resize; }
+body.resizing .tpane { pointer-events: none; }
+
+/* the sidebar's Agents list */
+.nav-agents { max-height: 34vh; overflow-y: auto; }
+.nav-ag { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-radius: var(--r-md); padding: 6px 10px; min-height: 44px; cursor: pointer; color: var(--text); }
+.nav-ag:hover { background: var(--surface-2); }
+.nav-ag .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 7px; background: var(--faint); }
+.nav-ag.st-working .dot { background: var(--live); animation: breathe 2s ease-in-out infinite; }
+.nav-ag.st-blocked { background: var(--ask-bg); box-shadow: inset 2px 0 0 var(--attn-solid); }
+.nav-ag.st-blocked .dot { background: var(--attn); animation: breathe 1.4s ease-in-out infinite; }
+.nav-ag.st-blocked small { color: var(--ask-fg); }
+.nav-ag.st-done .dot { background: var(--sky); }
+.nav-ag .mt { display: grid; min-width: 0; }
+.nav-ag .mt b { font: 500 13px/18px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-ag .mt small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-h .nav-collapse { margin-left: auto; width: 28px; min-height: 28px; height: 28px; }
+@media (max-width: 768px) { .nav-collapse { display: none; } }
+/* notification toasts: a state colour, a title line */
+.toast.done { border-left-color: var(--sky); }
+.toast b { font: 600 13px/18px var(--head); }
+/* the sidebar folded to a rail of icons */
+@media (min-width: 769px) {
+  body.navmini #wall { grid-template-columns: 60px minmax(0, 1fr); }
+  body.navmini .nav { padding-left: 8px; padding-right: 8px; }
+  body.navmini .nav-h { flex-direction: column; gap: 8px; padding: 4px 0 10px; justify-content: center; }
+  body.navmini .nav-h b, body.navmini .nav-item > span:not(.tile), body.navmini .nav-item kbd, body.navmini .nav-item .mt,
+  body.navmini .nav-foot, body.navmini .nav-ag .mt { display: none; }
+  body.navmini .nav-h .nav-collapse { margin: 0; }
+  body.navmini .nav-h .nav-collapse .ico { transform: rotate(180deg); }
+  body.navmini .nav-sec { height: 1px; padding: 0; margin: 8px 6px; font-size: 0; background: var(--line); }
+  body.navmini .nav-item, body.navmini .nav-ag { justify-content: center; padding: 8px 0; gap: 0; }
+  body.navmini .nav-item > .ico { margin: 0; }
+  body.navmini .nav-ag .dot { margin: 0; }
+}
+
+/* alignment and polish found in a mouse-and-keyboard test */
+.terms:not([data-n="1"]) .tpane:not(.focus) .tbody { margin-top: var(--wbar-h, 40px); } /* the focused view carries the toolbar; the others keep its space so the terminals line up */
+.gutter:focus { outline: none; }
+.crumb { display: none; }
+body.rail .crumb { display: block; flex: 1; min-width: 0; margin: 0 8px; font: 500 13px/20px var(--head); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.rail #t-stabs { display: none; }
+.mbadge { order: 3; margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--attn-solid); color: var(--on-primary); font: 600 11px/18px var(--head); text-align: center; flex: none; }
+body.navmini .mbadge { position: absolute; top: 2px; right: 2px; }
+body.navmini .nav-item.mach { position: relative; }

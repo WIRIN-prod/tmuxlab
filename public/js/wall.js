@@ -3,22 +3,14 @@ import { $, $$, esc, S, api, act, W, toast, ago, bytes, home, winState, activeWi
 import { openTerm, renderTermBar } from './term.js';
 import { openNew, openChanges, openPalette, openSettings, openSchedules, openAgent, openShare, openBroadcast, openRepos, openLogs } from './sheets.js';
 import { start, addMachine } from './main.js';
+import { watchStates, allAgents, jumpTo, remote } from './notify.js';
 
-const seenPrompts = new Set();
 let fails = 0;
-let primed = false; // prompts already waiting when the app opens don't pop up
 export async function refresh() {
   try { S.sessions = await api('/api/sessions'); fails = 0; $('#offline').hidden = true; }
   catch { if (++fails >= 2) $('#offline').hidden = false; return; } // one blip isn't worth a banner
-  // tell the user about new questions from agents (phone alerts cover the app being closed)
-  for (const s of S.sessions) for (const w of s.windows) for (const p of w.panes || []) {
-    const k = `${s.name}:${w.index}.${p.index}:${p.prompt?.question}`;
-    if (p.prompt && !seenPrompts.has(k)) {
-      seenPrompts.add(k);
-      if (primed) toast(`${s.name} › ${w.name}: ${p.prompt.question}`, false, { action: 'Open', run: () => openTerm(s.name) });
-    }
-  }
-  primed = true;
+  watchStates(cfg(), S.sessions); // a toast, a sound and a system notification when an agent needs you or finishes (phone alerts cover the app being closed)
+  renderNavAgents();
   if (!$('#wall').hidden) renderWall();
   if (!$('#term').hidden) renderTermBar();
 }
@@ -41,6 +33,7 @@ function renderStats() {
   const n = { all: all.length, running: runs, waiting, idle: all.filter((s) => !s.windows.some((w) => w.running)).length };
   for (const b of $('#filters').children) b.dataset.n = n[b.dataset.f] || '';
   $('#dock-n').textContent = waiting || '';
+  document.title = `${waiting ? `(${waiting}) ` : ''}tmuxlab · ${cfg()?.name || S.info?.host || ''}`; // a tab you are not looking at still shows who needs you
   $('#stats').innerHTML = `${m ? `<span class="machine"><span class="mstat" title="${m.cores} cores, load ${m.load.toFixed(2)}">CPU <b>${m.cpu == null ? '…' : Math.round(m.cpu) + '%'}</b></span>
     <span class="mstat" title="${bytes(m.mem.used)} of ${bytes(m.mem.total)}">RAM <b>${Math.round(100 * m.mem.used / m.mem.total)}%</b></span>
     ${m.disk ? `<span class="mstat ${m.disk.used / m.disk.total > 0.9 ? 'warn' : ''}">Disk <b>${Math.round(100 * m.disk.used / m.disk.total)}%</b></span>` : ''}</span>` : ''}`;
@@ -65,9 +58,10 @@ const visible = () => S.sessions.filter(matches).filter((s) => S.filter === 'all
   (S.filter === 'running' ? s.windows.some((w) => w.running) : S.filter === 'waiting' ? s.windows.some((w) => w.prompt) : !s.windows.some((w) => w.running)));
 
 // the same state pill the terminal views show
-const AG_TXT = { working: 'working', blocked: 'needs you', done: 'done' };
+const AG_TXT = { blocked: 'needs you', working: 'working', done: 'done', idle: 'idle' }; // in rollup order: the most urgent wins
 function agState(s) {
-  const a = s.windows.flatMap((w) => w.panes || []).map((p) => p.agent?.state).find((x) => AG_TXT[x]);
+  const all = s.windows.flatMap((w) => w.panes || []).map((p) => p.agent?.state);
+  const a = Object.keys(AG_TXT).find((k) => all.includes(k));
   return a ? `<span class="tps st-${a}">${AG_TXT[a]}</span>` : '';
 }
 function promptHtml(s, w) {
@@ -340,13 +334,38 @@ async function countMachines() {
     .then((l) => { counts[m.base] = { n: l.length, run: l.filter((s) => s.windows.some((w) => w.running)).length }; }, () => { counts[m.base] = null; })));
   renderMachines();
 }
+// the sidebar's Agents list: every agent on every machine, in a fixed order, one click to its terminal
+const NAV_LBL = { blocked: 'needs you', working: 'working', done: 'done', idle: 'idle' };
+export function renderNavAgents() {
+  const list = allAgents(), multi = S.machines.length > 1, box = $('#nav-agents');
+  const html = list.map((a) => `<button class="nav-ag st-${a.state}" data-m="${a.i}" data-s="${esc(a.s.name)}" data-w="${a.w.index}" data-p="${a.p.index}" title="${esc(`${a.agent} ${a.s.name}${multi ? ` on ${a.m.name || new URL(a.m.base).host}` : ''}: ${NAV_LBL[a.state]}`)}">
+    <span class="dot"></span><span class="mt"><b>${esc(a.agent)} ${esc(a.s.name)}</b><small>${NAV_LBL[a.state]}${multi ? ` · ${esc(a.m.name || new URL(a.m.base).host)}` : ''}</small></span></button>`).join('');
+  box.hidden = !list.length; $('#nav-agents-h').hidden = !list.length;
+  if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
+}
+// herdr-style rail: the sidebar folds to icons (wide screens only; on a phone it is a drawer)
+const setMini = (on) => {
+  document.body.classList.toggle('navmini', on);
+  const b = $('#btn-navmini'); b.setAttribute('aria-pressed', String(on)); b.setAttribute('aria-label', on ? 'Expand the sidebar' : 'Collapse the sidebar'); b.title = b.getAttribute('aria-label');
+  store.set('navmini', on);
+};
+$('#btn-navmini').addEventListener('click', () => setMini(!document.body.classList.contains('navmini')));
+setMini(store.get('navmini', false));
+document.addEventListener('tl-remote', () => { renderNavAgents(); renderMachines(); });
+$('#nav-agents').addEventListener('click', (e) => {
+  const b = e.target.closest('.nav-ag'); if (!b) return;
+  closeNav(); jumpTo(S.machines[+b.dataset.m], b.dataset.s, +b.dataset.w, +b.dataset.p);
+});
 function renderMachines() {
   const run = S.sessions.filter((s) => s.windows.some((w) => w.running)).length;
   const html = S.machines.map((m, i) => {
-    const host = new URL(m.base).host, name = mLabel(m, i), c = i === S.cur ? { n: S.sessions.length, run } : counts[m.base];
+    const sess = i === S.cur ? S.sessions : remote.get(m.base)?.sessions || [];
+    const needs = sess.flatMap((s) => s.windows).flatMap((w) => w.panes || []).filter((p) => p.agent?.state === 'blocked').length;
+    const host = new URL(m.base).host, name = mLabel(m, i), rm = remote.get(m.base), c = i === S.cur ? { n: S.sessions.length, run } : rm ? (rm.err ? null : { n: rm.sessions.length, run: rm.sessions.filter((s) => s.windows.some((w) => w.running)).length }) : counts[m.base];
     return `<button class="nav-item mach" data-m="${i}" ${i === S.cur ? 'aria-current="true"' : ''}>
       <span class="tile ${c === null ? 'st-off' : c?.run ? 'st-run' : 'st-idle'}">${esc(name[0].toUpperCase())}</span>
-      <span class="mt"><b>${esc(name)}</b><small>${c === null ? 'offline' : c ? `${c.n} session${c.n === 1 ? '' : 's'}${c.run ? ` · ${c.run} running` : ''}` : esc(host)}</small></span></button>`;
+      ${needs ? `<span class="mbadge" title="${needs} agent${needs === 1 ? '' : 's'} need${needs === 1 ? 's' : ''} you">${needs}</span>` : ''}
+      <span class="mt"><b>${esc(name)}</b><small title="${esc(host)}">${c === null ? 'offline' : c ? `${c.n} session${c.n === 1 ? '' : 's'}${c.run ? ` · ${c.run} on` : ''}` : esc(host)}</small></span></button>`;
   }).join('');
   if ($('#machines').dataset.sig !== html) { $('#machines').dataset.sig = html; $('#machines').innerHTML = html; } // keep focus steady while polling
 }
