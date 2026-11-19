@@ -992,3 +992,9 @@ body.rail #t-stabs { display: none; }
 .mbadge { order: 3; margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--attn-solid); color: var(--on-primary); font: 600 11px/18px var(--head); text-align: center; flex: none; }
 body.navmini .mbadge { position: absolute; top: 2px; right: 2px; }
 body.navmini .nav-item.mach { position: relative; }
+
+/* the terminal already shows the full question: the card keeps one line and the answer buttons */
+#t-ask .aq { flex-wrap: nowrap; }
+#t-ask .aq .actx { display: none; }
+#t-ask .aqt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#t-ask.busy .aopts { opacity: .5; pointer-events: none; }

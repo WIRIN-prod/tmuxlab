@@ -154,7 +154,7 @@ function cardFor(s) {
   $('.asks', card).innerHTML = asks.map((w) => promptHtml(s, w)).join('');
   $('.where', card).innerHTML = whereHtml(aw);
   $('.card-f', card).innerHTML = `<button class="btn sm primary" data-a="open">Open</button>
-    ${rp ? `<button class="btn sm ghost danger" data-a="stop" data-t="${aw.index}.${rp.index}" aria-label="Stop ${esc(rp.cmd)}">Stop</button>`
+    ${rp ? `<button class="btn sm ghost${rp.agent && !['working', 'blocked'].includes(rp.agent.state) ? '' : ' danger'}" data-a="stop" data-t="${aw.index}.${rp.index}" aria-label="Stop ${esc(rp.cmd)}">Stop</button>`
       : aw.preset ? `<button class="btn sm run" data-a="start" title="${esc(aw.preset)}">Start ${esc(aw.preset.split(' ')[0])}</button>` : ''}
     <span class="use">${st ? `${Math.round(st.cpu)}% CPU · ${bytes(st.rss)}` : ''}</span>
     <button class="btn sm ghost icon" data-a="more" aria-haspopup="menu" aria-label="More actions for ${esc(s.name)}">${icon('more')}</button>`;

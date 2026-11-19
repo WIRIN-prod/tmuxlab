@@ -607,7 +607,7 @@ export async function openSettings(tab = 'alerts') {
   $('#set-font').value = T.fontSize;
   $('#set-awake').checked = store.get('awake', touch);
   $('#set-tmuxstatus').checked = store.get('tmuxStatus', false); $('#set-notify').checked = store.get('notify', true); $('#set-sound').checked = store.get('notifySound', true);
-  $('#set-notify-note').textContent = canNotify() ? (Notification.permission === 'denied' ? '(blocked by the browser: allow notifications for this site)' : '') : '(on-screen alerts only in this app)'; $('#vol-row').hidden = !window.TmuxlabNative; $('#set-vol').checked = store.get('volScroll', true);
+  $('#set-notify-note').textContent = canNotify() ? (!window.TmuxlabNative && Notification.permission === 'denied' ? '(blocked by the browser: allow notifications for this site)' : '') : '(on-screen alerts only in this app)'; $('#vol-row').hidden = !window.TmuxlabNative; $('#set-vol').checked = store.get('volScroll', true);
   setTab(tab);
   dSet.showModal();
   try {

@@ -178,7 +178,7 @@ const routes = [
     await acts[b.action](); return {};
   }],
   // answer an arrow-key menu (agent permission prompts): move from the selected option to n, then Enter
-  ['POST', r(`${W}/choose`), async ([s, w], b) => { await choose(tgt(s, w), b.n | 0); return {}; }],
+  ['POST', r(`${W}/choose`), async ([s, w], b) => { await choose(tgt(s, w), b.n | 0, b.question); return {}; }],
   // past Claude Code / Codex conversations started in a folder
   ['GET', r('/api/agents/(claude|codex)/history'), ([a], _, q) => {
     const cwd = resolveCwd(q.get('cwd') || '');

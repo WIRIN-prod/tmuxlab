@@ -590,7 +590,7 @@ export function renderTermBar() {
   }
   const ap = activePane(w);
   const tg = $('#w-toggle');
-  if (ap.running) { tg.textContent = `Stop ${ap.cmd}`; tg.className = 'btn sm ghost danger'; tg.dataset.a = 'stop'; }
+  if (ap.running) { tg.textContent = `Stop ${ap.cmd}`; tg.className = `btn sm ghost${ap.agent && !['working', 'blocked'].includes(ap.agent.state) ? '' : ' danger'}`; tg.dataset.a = 'stop'; }
   else if (ap.preset) { tg.textContent = `Start ${ap.preset.split(' ')[0].split('/').pop()}`; tg.className = 'btn sm run'; tg.dataset.a = 'start'; }
   else { tg.textContent = 'Run…'; tg.className = 'btn sm'; tg.dataset.a = 'run'; }
   tg.title = ap.preset || '';
@@ -611,14 +611,16 @@ export function renderTermBar() {
   pr.innerHTML = w.panes.map((x) => `<button class="pchip" data-p="${x.index}" aria-current="${x.active}">
     <span class="dot ${x.prompt ? 'ask-dot' : x.dead ? 'dead' : x.running ? 'run' : ''}"></span>${x.index} ${esc(x.cmd)}</button>`).join('');
   // a question from the agent, answered with one tap
-  const asking = w.panes.find((x) => x.prompt);
+  // this window first, then any other window of the session: a question must never wait unseen behind a tab
+  const askWin = w.panes.some((x) => x.prompt) ? w : s.windows.find((x) => x.panes.some((q) => q.prompt));
+  const asking = askWin?.panes.find((x) => x.prompt);
   const ab = $('#t-ask');
   ab.hidden = !asking;
   if (asking) {
-    const sig2 = JSON.stringify(asking.prompt);
+    const sig2 = JSON.stringify([asking.prompt, askWin.index, asking.index]);
     if (ab.dataset.sig !== sig2) {
-      ab.dataset.sig = sig2; ab.dataset.t = `${w.index}.${asking.index}`;
-      ab.innerHTML = `<div class="aq"><span class="dot ask-dot"></span>${esc(asking.prompt.question)}${asking.prompt.context ? `<code class="actx">${esc(asking.prompt.context)}</code>` : ''}</div><div class="aopts">${asking.prompt.options.map((o) =>
+      ab.dataset.sig = sig2; ab.dataset.t = `${askWin.index}.${asking.index}`; ab.dataset.q = asking.prompt.question;
+      ab.innerHTML = `<div class="aq"><span class="dot ask-dot"></span>${askWin !== w ? `<b>${esc(askWin.name)}</b>` : ''}<span class="aqt">${esc(asking.prompt.question)}</span>${asking.prompt.context ? `<code class="actx">${esc(asking.prompt.context)}</code>` : ''}</div><div class="aopts">${asking.prompt.options.map((o) =>
         `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label)}</button>`).join('')}</div>`;
     }
   }
@@ -655,9 +657,11 @@ $('#t-panes').addEventListener('click', async (e) => {
   await act(`${W(p.s, `${p.win.index}.${b.dataset.p}`)}/select`); refresh();
 });
 $('#t-ask').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-n]'); const p = focused(); if (!b || !p) return;
-  await act(`${W(p.s, $('#t-ask').dataset.t)}/choose`, { n: +b.dataset.n });
-  $('#t-ask').hidden = true; setTimeout(refresh, 500);
+  const b = e.target.closest('[data-n]'); const p = focused(); const ab = $('#t-ask'); if (!b || !p || ab.dataset.busy) return;
+  ab.dataset.busy = 1; ab.classList.add('busy'); // a second tap must not send a second answer to the agent
+  try { await act(`${W(p.s, ab.dataset.t)}/choose`, { n: +b.dataset.n, question: ab.dataset.q }); ab.hidden = true; }
+  catch {} // act() already told the user why
+  finally { delete ab.dataset.busy; ab.classList.remove('busy'); ab.dataset.sig = ''; setTimeout(refresh, 400); }
 });
 async function renameSession() {
   const p = focused(); if (!p) return;

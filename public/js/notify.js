@@ -30,10 +30,12 @@ function beep(kind) {
   } catch {}
 }
 
-export const canNotify = () => typeof Notification !== 'undefined';
+const native = () => window.TmuxlabNative?.notify ? window.TmuxlabNative : null; // the Android app has no Notification API
+export const canNotify = () => !!native() || typeof Notification !== 'undefined';
 // the settings switch asks for permission the moment it is turned on (browsers only allow that from a click)
 export async function allowSystemNotifications() {
   if (!canNotify()) return false;
+  if (native()) { native().askNotify(); return true; }
   if (Notification.permission === 'default') await Notification.requestPermission().catch(() => {});
   return Notification.permission === 'granted';
 }
@@ -49,7 +51,9 @@ async function announce(m, s, w, p, state) {
   const run = () => jumpTo(m, s.name, w.index, p.index);
   toast(body || LABEL[state], false, { title: `${title} ${LABEL[state]}`, kind: state === 'blocked' ? 'ask' : 'done', action: 'Open', run });
   if (store.get('notifySound', true)) beep(state);
-  if (canNotify() && Notification.permission === 'granted' && (document.hidden || !document.hasFocus())) {
+  const away = document.hidden || !document.hasFocus();
+  if (native() && away) native().notify(`${title} ${LABEL[state]}`, body || LABEL[state], `${m.base}|${s.name}:${w.index}.${p.index}`);
+  else if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && away) {
     const n = new Notification(`${title} ${LABEL[state]}`, { body, tag: `${m.base}|${s.name}:${w.index}.${p.index}`, silent: true });
     n.onclick = () => { window.focus(); n.close(); run(); };
   }
