@@ -7,7 +7,7 @@ export const store = {
   set(k, v) { try { localStorage.setItem('tl.' + k, JSON.stringify(v)); } catch {} },
 };
 export const isApp = !!window.Capacitor?.isNativePlatform?.();
-export const VERSION = '2.16.0'; // this build; kept equal to package.json by a test
+export const VERSION = '2.17.0'; // this build; kept equal to package.json by a test
 export const touch = matchMedia('(pointer: coarse)').matches;
 
 export const S = {

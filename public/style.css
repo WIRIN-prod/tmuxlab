@@ -1,44 +1,45 @@
-/* tmuxlab: a quiet devtools workspace. Zinc strata and hairlines; colour is telemetry only:
-   emerald running/active, amber needs you, sky done, zinc idle, red ended. Geist frames, Inter reads, JetBrains Mono for machine text. */
+/* tmuxlab: a blue-black devtools workspace. Azure is action, teal is running, amber is needs you, pale sky done, grey-blue idle, red errors.
+   Geist frames, Inter reads, JetBrains Mono for machine text. */
 :root {
-  /* zinc strata: depth comes from tone and hairlines, not shadows */
-  --bg: #09090b;          /* root canvas, behind every pane */
-  --well: #09090b;        /* inputs */
-  --surface: #121215;     /* level 1: cards, sidebars, panes */
-  --surface-2: #18181b;   /* level 2: popovers, dialogs, secondary buttons */
-  --surface-3: #27272a;   /* hover fill */
-  --line: #27272a;        /* hairlines */
-  --line-strong: #3f3f46; /* hover / popover borders */
-  --text: #fafafa;
-  --muted: #a1a1aa;       /* secondary */
-  --faint: #71717a;       /* metadata */
-  --primary: #10b981;     /* emerald: active, connected, primary action, focus */
-  --primary-text: #34d399;
-  --on-primary: #09090b;
-  --primary-solid: #10b981; --primary-press: #059669; --primary-ring: #34d399;
-  --live: #34d399;        /* running */
-  --attn: #fbbf24;        /* needs you (text) */
-  --attn-solid: #f59e0b; --attn-press: #d97706; --attn-hi: #fbbf24;
-  --on-attn: #09090b;
-  --danger: #ef4444;
-  --sky: #38bdf8;         /* done */
-  --screen: #121215;      /* terminal canvas */
-  --frame: #121215; --frame-line: #27272a;
-  --keypad: #121215;
-  --scrim: rgb(9 9 11 / .7);
-  --code-bg: #27272a;
-  --lift: 0 4px 20px -2px rgb(0 0 0 / .5);
+  /* blue-black strata: depth comes from tone and hairlines. Two accents (azure = action and focus, teal = running)
+     and one complementary colour (amber = needs you). Done is a pale sky, idle a grey-blue, red only for errors. */
+  --bg: #090d16;          /* root canvas, behind every pane */
+  --well: #090d16;        /* inputs */
+  --surface: #0e1424;     /* level 1: cards, sidebars, panes */
+  --surface-2: #131b2e;   /* level 2: popovers, dialogs, secondary buttons */
+  --surface-3: #1b2540;   /* hover fill */
+  --line: #1d2740;        /* hairlines */
+  --line-strong: #2c3a5c; /* hover / popover borders */
+  --text: #eaf0ff;
+  --muted: #9fb0d0;       /* secondary */
+  --faint: #7183a6;       /* metadata */
+  --primary: #5b8cff;     /* azure: primary action, selection, focus */
+  --primary-text: #8db0ff;
+  --on-primary: #06101f;
+  --primary-solid: #5b8cff; --primary-press: #3f6fe6; --primary-ring: #8db0ff;
+  --live: #2dd4bf;        /* running: teal */
+  --attn: #ffb547;        /* needs you: amber, the complement of the blues */
+  --attn-solid: #ff9f1c; --attn-press: #e08600; --attn-hi: #ffc266;
+  --on-attn: #1a1000;
+  --danger: #f0566a;
+  --sky: #7cc4ff;         /* done */
+  --screen: #0b1220;      /* terminal canvas */
+  --frame: #0b1220; --frame-line: #1d2740;
+  --keypad: #0e1424;
+  --scrim: rgb(6 9 16 / .72);
+  --code-bg: #1b2540;
+  --lift: 0 8px 28px -6px rgb(0 0 0 / .55);
   /* status tints: low-alpha fills, faint borders */
-  --ask-bg: rgb(245 158 11 / .08); --ask-sf: rgb(245 158 11 / .14); --ask-bd: rgb(245 158 11 / .4); --ask-fg: #fbbf24;
-  --work-bg: rgb(16 185 129 / .08); --work-bd: rgb(16 185 129 / .2); --work-fg: #34d399;
-  --done-bg: rgb(14 165 233 / .08); --done-bd: rgb(14 165 233 / .25); --done-fg: #38bdf8;
-  --idle-bg: rgb(113 113 122 / .1); --idle-bd: rgb(113 113 122 / .2); --idle-fg: #a1a1aa;
-  --err-bg: rgb(239 68 68 / .08); --err-bd: rgb(239 68 68 / .3); --err-fg: #f87171;
+  --ask-bg: rgb(255 181 71 / .08); --ask-sf: rgb(255 181 71 / .14); --ask-bd: rgb(255 181 71 / .4); --ask-fg: #ffc266;
+  --work-bg: rgb(45 212 191 / .08); --work-bd: rgb(45 212 191 / .22); --work-fg: #2dd4bf;
+  --done-bg: rgb(124 196 255 / .08); --done-bd: rgb(124 196 255 / .25); --done-fg: #7cc4ff;
+  --idle-bg: rgb(113 131 166 / .1); --idle-bd: rgb(113 131 166 / .22); --idle-fg: #9fb0d0;
+  --err-bg: rgb(240 86 106 / .08); --err-bd: rgb(240 86 106 / .3); --err-fg: #ff8a99;
 
   --ui: 'Inter', system-ui, sans-serif;
   --head: 'Geist', 'Inter', system-ui, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
-  --r-xs: 2px; --r-sm: 4px; --r-md: 4px; --r-lg: 8px; --r-xl: 12px;
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px;
   --shadow-1: none;
   --shadow-2: var(--lift);
   --ease-out: cubic-bezier(.2, .8, .2, 1);
@@ -788,7 +789,7 @@ dialog::backdrop, .scrim { background: var(--scrim); backdrop-filter: blur(4px);
 .terms { gap: 8px; background: transparent; }
 /* panes: level 1 surfaces with hairlines; the active one gets an emerald inset and a faint glow */
 .tpane { position: relative; container: view / inline-size; background: var(--frame); border: 1px solid var(--frame-line); border-radius: var(--r-lg); overflow: hidden; transition: box-shadow var(--t-fast); }
-.tpane.focus { box-shadow: inset 0 0 0 1px var(--primary), 0 0 12px rgb(16 185 129 / .15); border-color: var(--primary); }
+.tpane.focus { box-shadow: inset 0 0 0 1px var(--primary), 0 0 14px rgb(91 140 255 / .18); border-color: var(--primary); }
 .terms[data-n="1"] .tpane.focus { box-shadow: none; border-color: var(--frame-line); }
 .tph { min-height: 32px; padding: 0 4px 0 10px; gap: 8px; background: var(--surface); border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--muted); }
 .tph .tpn { padding: 4px 0; min-height: 28px; }
@@ -875,7 +876,6 @@ dialog::backdrop, .scrim { background: var(--scrim); backdrop-filter: blur(4px);
   body:has(#wall:not([hidden])) #toasts { bottom: calc(var(--safe-b) + 72px); }
 }
 .fab { border-radius: var(--r-lg); background: var(--primary-solid); color: var(--on-primary); box-shadow: var(--lift); }
-:root[data-term="ink"] { --term-bg: #121215; }
 @media (prefers-reduced-motion: reduce) { .tps::before, .dot { animation: none !important; } }
 
 /* ----- light theme: the same zinc ladder, inverted; terminals keep their own theme ----- */
@@ -883,12 +883,12 @@ dialog::backdrop, .scrim { background: var(--scrim); backdrop-filter: blur(4px);
   color-scheme: light;
   --bg: #f4f4f5; --well: #ffffff; --surface: #ffffff; --surface-2: #fafafa; --surface-3: #f0f0f2;
   --line: #e4e4e7; --line-strong: #a1a1aa; --text: #09090b; --muted: #52525b; --faint: #63636d;
-  --primary: #059669; --primary-text: #047857; --primary-solid: #10b981; --primary-press: #059669; --on-primary: #09090b;
-  --live: #047857; --attn: #b45309; --attn-hi: #fbbf24; --danger: #dc2626; --sky: #0284c7;
+  --primary: #2f62e0; --primary-text: #1d4fc4; --primary-solid: #3b6ff0; --primary-press: #2f62e0; --on-primary: #ffffff;
+  --live: #0f766e; --attn: #b45309; --attn-hi: #fbbf24; --danger: #dc2626; --sky: #0284c7;
   --frame: #ffffff; --frame-line: #e4e4e7; --keypad: #fafafa; --code-bg: #f0f0f2;
   --scrim: rgb(9 9 11 / .3); --lift: 0 4px 20px -2px rgb(9 9 11 / .12);
   --ask-bg: rgb(245 158 11 / .08); --ask-sf: rgb(245 158 11 / .16); --ask-bd: rgb(217 119 6 / .45); --ask-fg: #92400e;
-  --work-bg: rgb(16 185 129 / .08); --work-bd: rgb(5 150 105 / .3); --work-fg: #047857;
+  --work-bg: rgb(15 118 110 / .08); --work-bd: rgb(15 118 110 / .3); --work-fg: #0f766e;
   --done-bg: rgb(14 165 233 / .08); --done-bd: rgb(2 132 199 / .3); --done-fg: #0369a1;
   --idle-bg: rgb(113 113 122 / .08); --idle-bd: rgb(113 113 122 / .3); --idle-fg: #52525b;
   --err-bg: rgb(239 68 68 / .06); --err-bd: rgb(220 38 38 / .35); --err-fg: #b91c1c;
@@ -897,12 +897,12 @@ dialog::backdrop, .scrim { background: var(--scrim); backdrop-filter: blur(4px);
   color-scheme: light;
   --bg: #f4f4f5; --well: #ffffff; --surface: #ffffff; --surface-2: #fafafa; --surface-3: #f0f0f2;
   --line: #e4e4e7; --line-strong: #a1a1aa; --text: #09090b; --muted: #52525b; --faint: #63636d;
-  --primary: #059669; --primary-text: #047857; --primary-solid: #10b981; --primary-press: #059669; --on-primary: #09090b;
-  --live: #047857; --attn: #b45309; --attn-hi: #fbbf24; --danger: #dc2626; --sky: #0284c7;
+  --primary: #2f62e0; --primary-text: #1d4fc4; --primary-solid: #3b6ff0; --primary-press: #2f62e0; --on-primary: #ffffff;
+  --live: #0f766e; --attn: #b45309; --attn-hi: #fbbf24; --danger: #dc2626; --sky: #0284c7;
   --frame: #ffffff; --frame-line: #e4e4e7; --keypad: #fafafa; --code-bg: #f0f0f2;
   --scrim: rgb(9 9 11 / .3); --lift: 0 4px 20px -2px rgb(9 9 11 / .12);
   --ask-bg: rgb(245 158 11 / .08); --ask-sf: rgb(245 158 11 / .16); --ask-bd: rgb(217 119 6 / .45); --ask-fg: #92400e;
-  --work-bg: rgb(16 185 129 / .08); --work-bd: rgb(5 150 105 / .3); --work-fg: #047857;
+  --work-bg: rgb(15 118 110 / .08); --work-bd: rgb(15 118 110 / .3); --work-fg: #0f766e;
   --done-bg: rgb(14 165 233 / .08); --done-bd: rgb(2 132 199 / .3); --done-fg: #0369a1;
   --idle-bg: rgb(113 113 122 / .08); --idle-bd: rgb(113 113 122 / .3); --idle-fg: #52525b;
   --err-bg: rgb(239 68 68 / .06); --err-bd: rgb(220 38 38 / .35); --err-fg: #b91c1c;
@@ -1011,3 +1011,14 @@ body.navmini .nav-item.mach { position: relative; }
 #t-ask .hint { font: 12px var(--ui); color: var(--muted); white-space: nowrap; }
 .asks .ask { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
 .asks .ask .aqt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/20px var(--ui); }
+
+/* ----- 2.17: blue-black redesign. Session rows are separate cards with room between them; an asking session is tinted amber ----- */
+.grid.list { border: 0; background: none; overflow: visible; gap: 8px; }
+.grid.list .phead { padding-inline: 4px; }
+.card.srow, .card.srow:last-child { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; transition: border-color var(--t-fast), background var(--t-fast); }
+.card.srow:hover { border-color: var(--line-strong); }
+.card.srow:has(.asks:not(:empty)) { border-color: var(--ask-bd); background: color-mix(in srgb, var(--attn) 5%, var(--surface)); box-shadow: none; }
+.srow-m:hover { background: transparent; }
+.srow .asks .ask { background: var(--ask-sf); border-color: var(--ask-bd); }
+.card { border-radius: var(--r-lg); }
+.btn.primary { box-shadow: 0 1px 0 rgb(255 255 255 / .12) inset; }
