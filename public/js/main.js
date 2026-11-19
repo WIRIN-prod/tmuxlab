@@ -1,5 +1,5 @@
 // Boot: connect to the current machine, then poll.
-import { $, esc, S, api, act, toast, cfg, saveMachines, learnAddrs, origin, show, isApp, Unauthorized, busy, VERSION } from './core.js';
+import { $, esc, S, findSess, api, act, toast, cfg, saveMachines, learnAddrs, origin, show, isApp, Unauthorized, busy, VERSION } from './core.js';
 import { refresh, refreshPreviews, refreshStats } from './wall.js';
 import { closeTerm, openTerm } from './term.js';
 import './sheets.js';
@@ -165,6 +165,9 @@ export async function start() {
   await refresh();
   refreshPreviews(); refreshStats();
   pollers = [setInterval(() => !document.hidden && refresh(), 2000), setInterval(refreshPreviews, 3000), setInterval(refreshStats, 3000)];
+  // a phone alert links to /?go=session:window
+  const go = new URLSearchParams(location.search).get('go');
+  if (go) { history.replaceState(null, '', location.pathname); const [name, w] = go.split(/:(?=\d+$)/); if (findSess(name)) openTerm(name, w == null ? undefined : +w); }
 }
 start();
 

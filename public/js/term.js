@@ -5,6 +5,26 @@ import { refresh, refreshPreviews } from './wall.js';
 import { openNew, openChanges, openFind, pickWindow, openSettings, openAgent, openPalette } from './sheets.js';
 
 export const THEMES = {
+  midnight: { background: '#0b1220', foreground: '#d6e2f5', cursor: '#5eead4', cursorAccent: '#0b1220', selectionBackground: '#3b82f655',
+    black: '#0b1220', brightBlack: '#51627f', red: '#fb7185', green: '#5eead4', yellow: '#fcd34d', blue: '#60a5fa',
+    magenta: '#a78bfa', cyan: '#67e8f9', white: '#c3d1e8', brightRed: '#fda4af', brightGreen: '#99f6e4', brightYellow: '#fde68a',
+    brightBlue: '#93c5fd', brightMagenta: '#c4b5fd', brightCyan: '#a5f3fc', brightWhite: '#f1f6ff' },
+  tokyo: { background: '#1a1b26', foreground: '#c0caf5', cursor: '#c0caf5', cursorAccent: '#1a1b26', selectionBackground: '#33467c88',
+    black: '#15161e', brightBlack: '#565f89', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68', blue: '#7aa2f7',
+    magenta: '#bb9af7', cyan: '#7dcfff', white: '#a9b1d6', brightRed: '#ff899d', brightGreen: '#b9f27c', brightYellow: '#ffc777',
+    brightBlue: '#8db0ff', brightMagenta: '#c7a9ff', brightCyan: '#a4daff', brightWhite: '#c0caf5' },
+  mocha: { background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc', cursorAccent: '#1e1e2e', selectionBackground: '#585b7088',
+    black: '#45475a', brightBlack: '#6c7086', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af', blue: '#89b4fa',
+    magenta: '#f5c2e7', cyan: '#94e2d5', white: '#bac2de', brightRed: '#f38ba8', brightGreen: '#a6e3a1', brightYellow: '#f9e2af',
+    brightBlue: '#89b4fa', brightMagenta: '#f5c2e7', brightCyan: '#94e2d5', brightWhite: '#a6adc8' },
+  nord: { background: '#2e3440', foreground: '#d8dee9', cursor: '#88c0d0', cursorAccent: '#2e3440', selectionBackground: '#434c5eaa',
+    black: '#3b4252', brightBlack: '#4c566a', red: '#bf616a', green: '#a3be8c', yellow: '#ebcb8b', blue: '#81a1c1',
+    magenta: '#b48ead', cyan: '#88c0d0', white: '#e5e9f0', brightRed: '#d08770', brightGreen: '#a3be8c', brightYellow: '#ebcb8b',
+    brightBlue: '#81a1c1', brightMagenta: '#b48ead', brightCyan: '#8fbcbb', brightWhite: '#eceff4' },
+  dracula: { background: '#21222c', foreground: '#f8f8f2', cursor: '#ff79c6', cursorAccent: '#21222c', selectionBackground: '#44475a99',
+    black: '#21222c', brightBlack: '#6272a4', red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c', blue: '#bd93f9',
+    magenta: '#ff79c6', cyan: '#8be9fd', white: '#f8f8f2', brightRed: '#ff6e6e', brightGreen: '#69ff94', brightYellow: '#ffffa5',
+    brightBlue: '#d6acff', brightMagenta: '#ff92df', brightCyan: '#a4ffff', brightWhite: '#ffffff' },
   ink: { background: '#121215', foreground: '#e4e4e7', cursor: '#34d399', cursorAccent: '#121215', selectionBackground: '#10b98140',
     black: '#18181b', brightBlack: '#71717a', red: '#f87171', green: '#34d399', yellow: '#fbbf24', blue: '#60a5fa',
     magenta: '#c084fc', cyan: '#38bdf8', white: '#d4d4d8', brightRed: '#fca5a5', brightGreen: '#6ee7b7', brightYellow: '#fde68a',
@@ -22,7 +42,7 @@ export const THEMES = {
 
 export const T = {
   panes: [], focus: 0, mods: { ctrl: false, alt: false },
-  fontSize: store.get('font', 13), theme: store.get('theme', 'ink'), wake: null,
+  fontSize: store.get('font', 13), theme: THEMES[store.get('theme', 'midnight')] ? store.get('theme', 'midnight') : 'midnight', wake: null,
 };
 const MAX_PANES = 4;
 let lastCopy = '';
@@ -49,7 +69,7 @@ class Pane {
       <div class="tbody"><div class="xt"></div>
       <div class="banner" hidden><span>Reconnecting…</span><button class="btn sm">Retry now</button></div>
       <div class="scrollhint" hidden>History · scroll down to return<button class="btn sm">Exit</button></div></div>`;
-    this.term = new Terminal({ rightClickSelectsWord: false, fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace", fontSize: T.fontSize, lineHeight: 1.25, cursorBlink: true,
+    this.term = new Terminal({ rightClickSelectsWord: false, fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace", fontSize: T.fontSize, lineHeight: 1.35, cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, letterSpacing: 0.2,
       allowProposedApi: true, scrollback: 0, theme: THEMES[T.theme] }); // tmux owns history
     this.fit = new FitAddon.FitAddon();
     this.term.loadAddon(this.fit);
@@ -87,10 +107,24 @@ class Pane {
         return;
       }
       if (e.button !== 0) return;
+      // a plain click reaches the program (Claude Code's menus take clicks); only a drag becomes a text selection
       e.stopImmediatePropagation(); e.preventDefault();
-      this.term.clearSelection(); // or Shift would extend the old selection
-      e.target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, detail: e.detail, screenX: e.screenX, screenY: e.screenY,
-        clientX: e.clientX, clientY: e.clientY, button: 0, buttons: e.buttons, shiftKey: true }));
+      const t = e.target, x0 = e.clientX, y0 = e.clientY; let moved = false;
+      const mk = (type, ev, shiftKey) => new MouseEvent(type, { bubbles: true, cancelable: true, view: window, detail: ev.detail, screenX: ev.screenX, screenY: ev.screenY,
+        clientX: ev.clientX, clientY: ev.clientY, button: 0, buttons: type === 'mouseup' ? 0 : 1, shiftKey });
+      const move = (m) => {
+        if (Math.hypot(m.clientX - x0, m.clientY - y0) < 4) return;
+        moved = true; document.removeEventListener('mousemove', move, true);
+        this.term.clearSelection(); // or Shift would extend the old selection
+        t.dispatchEvent(mk('mousedown', e, true));
+      };
+      const up = (u) => {
+        document.removeEventListener('mousemove', move, true); document.removeEventListener('mouseup', up, true);
+        if (moved) return;
+        u.stopImmediatePropagation();
+        t.dispatchEvent(mk('mousedown', e, false)); t.dispatchEvent(mk('mouseup', u, false));
+      };
+      document.addEventListener('mousemove', move, true); document.addEventListener('mouseup', up, true);
     }, true);
     xt.addEventListener('contextmenu', (e) => {
       if (touch || e.altKey || !navigator.clipboard?.readText) return; // phones and plain http keep the browser's own menu (it has Paste)
@@ -611,17 +645,16 @@ export function renderTermBar() {
   pr.innerHTML = w.panes.map((x) => `<button class="pchip" data-p="${x.index}" aria-current="${x.active}">
     <span class="dot ${x.prompt ? 'ask-dot' : x.dead ? 'dead' : x.running ? 'run' : ''}"></span>${x.index} ${esc(x.cmd)}</button>`).join('');
   // a question from the agent, answered with one tap
-  // this window first, then any other window of the session: a question must never wait unseen behind a tab
+  // an agent is asking somewhere in this session: show it, and the way there when it is another window
   const askWin = w.panes.some((x) => x.prompt) ? w : s.windows.find((x) => x.panes.some((q) => q.prompt));
   const asking = askWin?.panes.find((x) => x.prompt);
   const ab = $('#t-ask');
   ab.hidden = !asking;
   if (asking) {
-    const sig2 = JSON.stringify([asking.prompt, askWin.index, asking.index]);
+    const sig2 = JSON.stringify([asking.prompt.question, askWin.index, askWin === w]);
     if (ab.dataset.sig !== sig2) {
-      ab.dataset.sig = sig2; ab.dataset.t = `${askWin.index}.${asking.index}`; ab.dataset.q = asking.prompt.question;
-      ab.innerHTML = `<div class="aq"><span class="dot ask-dot"></span>${askWin !== w ? `<b>${esc(askWin.name)}</b>` : ''}<span class="aqt">${esc(asking.prompt.question)}</span>${asking.prompt.context ? `<code class="actx">${esc(asking.prompt.context)}</code>` : ''}</div><div class="aopts">${asking.prompt.options.map((o) =>
-        `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label)}</button>`).join('')}</div>`;
+      ab.dataset.sig = sig2; ab.dataset.w = askWin.index;
+      ab.innerHTML = `<span class="dot ask-dot"></span><span class="aqt">${askWin !== w ? `<b>${esc(askWin.name)}</b> ` : ''}${esc(asking.prompt.question)}</span>${askWin !== w ? '<button class="btn sm primary" data-go>Go</button>' : '<span class="hint">answer below</span>'}`;
     }
   }
   for (const x of T.panes) $('.scrollhint', x.el).hidden = !x.win?.inMode;
@@ -657,11 +690,8 @@ $('#t-panes').addEventListener('click', async (e) => {
   await act(`${W(p.s, `${p.win.index}.${b.dataset.p}`)}/select`); refresh();
 });
 $('#t-ask').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-n]'); const p = focused(); const ab = $('#t-ask'); if (!b || !p || ab.dataset.busy) return;
-  ab.dataset.busy = 1; ab.classList.add('busy'); // a second tap must not send a second answer to the agent
-  try { await act(`${W(p.s, ab.dataset.t)}/choose`, { n: +b.dataset.n, question: ab.dataset.q }); ab.hidden = true; }
-  catch {} // act() already told the user why
-  finally { delete ab.dataset.busy; ab.classList.remove('busy'); ab.dataset.sig = ''; setTimeout(refresh, 400); }
+  const p = focused(); if (!e.target.closest('[data-go]') || !p) return;
+  await act(`${W(p.view || p.s, $('#t-ask').dataset.w)}/select`); refresh();
 });
 async function renameSession() {
   const p = focused(); if (!p) return;
@@ -827,11 +857,16 @@ export function setFont(n) {
   for (const p of T.panes) { p.term.options.fontSize = T.fontSize; try { p.fit.fit(); } catch {} }
 }
 export function setTheme(name) {
-  T.theme = THEMES[name] ? name : 'ink'; store.set('theme', T.theme);
+  T.theme = THEMES[name] ? name : 'midnight'; store.set('theme', T.theme);
   for (const p of T.panes) p.term.options.theme = THEMES[T.theme];
-  document.documentElement.dataset.term = T.theme;
+  paintTheme();
 }
-document.documentElement.dataset.term = T.theme;
+// the frame around the terminal takes the theme's own colours, so the terminal and its chrome read as one surface
+function paintTheme() {
+  const t = THEMES[T.theme], r = document.documentElement;
+  r.dataset.term = T.theme; r.style.setProperty('--term-bg', t.background); r.style.setProperty('--term-fg', t.foreground); r.style.setProperty('--term-accent', t.cursor);
+}
+paintTheme();
 // app chrome: dark (default), light, or follow the system
 export function setUi(v) { document.documentElement.dataset.ui = ['light', 'auto'].includes(v) ? v : 'dark'; store.set('ui', document.documentElement.dataset.ui); }
 document.documentElement.dataset.ui = store.get('ui', 'dark');

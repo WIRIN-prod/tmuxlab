@@ -85,7 +85,7 @@ test('panes: split, zoom, sync, next, kill', async () => {
   await api('/api/sessions/p', 'DELETE');
 });
 
-test('detects a choice prompt and answers it with arrows + Enter', async () => {
+test('detects a choice prompt', async () => {
   const menu = path.join(home, 'menu.py');
   // a fake agent (not a shell, so it counts as running) with an arrow-key menu
   fs.writeFileSync(menu, `import sys, tty, termios, time
@@ -102,11 +102,6 @@ while True:
   const w = await until(async () => (await find('q')).windows[0].prompt && (await find('q')).windows[0]);
   assert.equal(w.prompt.question, 'Do you want to proceed?');
   assert.equal(w.prompt.selected, 1);
-  await api('/api/windows/q/0/choose', 'POST', { n: 2 });
-  await until(async () => (await api('/api/windows/q/0/capture')).text.includes('CHOSE-2'));
-  // the cleared menu lingers in tmux history; it must not count as still waiting
-  await until(async () => (await find('q')).windows[0].prompt === null);
-  await assert.rejects(api('/api/windows/q/0/choose', 'POST', { n: 1 }), /409/);
   await api('/api/sessions/q', 'DELETE');
 });
 

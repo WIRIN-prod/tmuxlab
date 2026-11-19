@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
 import { CONF, httpErr, sleep, resolveCwd, loadConf, saveConf, NAME_RE } from './lib/util.js';
-import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, setProject, storedCmd, interrupt, killViews, choose, VIEW_RE } from './lib/tmux.js';
+import { TMUX, SOCK, tmux, sess, tgt, listPanes, shape, startCmd, setProject, storedCmd, interrupt, killViews, VIEW_RE } from './lib/tmux.js';
 import { claudeHistory, codexHistory } from './lib/agents.js';
 import * as G from './lib/git.js';
 import { stats, openPorts } from './lib/stats.js';
@@ -18,7 +18,7 @@ import * as rs from './lib/restore.js';
 import * as logs from './lib/logs.js';
 const { setMaster } = auth;
 import { parseCron, nextRun } from './lib/cron.js';
-import { startWatcher, prompts, status, agentState, unread, lastRuns, notify, answerToken } from './lib/watch.js';
+import { startWatcher, prompts, status, agentState, unread, lastRuns, notify } from './lib/watch.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 7681);
@@ -177,8 +177,6 @@ const routes = [
     if (!acts[b.action]) throw httpErr(400, 'bad action');
     await acts[b.action](); return {};
   }],
-  // answer an arrow-key menu (agent permission prompts): move from the selected option to n, then Enter
-  ['POST', r(`${W}/choose`), async ([s, w], b) => { await choose(tgt(s, w), b.n | 0, b.question); return {}; }],
   // past Claude Code / Codex conversations started in a folder
   ['GET', r('/api/agents/(claude|codex)/history'), ([a], _, q) => {
     const cwd = resolveCwd(q.get('cwd') || '');
@@ -347,12 +345,6 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('access-control-allow-headers', 'authorization, content-type');
   res.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
-  const ans = req.method === 'POST' && url.pathname.match(/^\/api\/answer\/([\w-]{20,64})$/);
-  if (ans) {
-    const a = answerToken(ans[1]);
-    if (!a) return send(res, 410, { error: 'this answer link was used or has expired' });
-    try { await choose(a.pane, a.n, a.question); return send(res, 200, { ok: true }); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
-  }
   const who = auth.check((req.headers.authorization || '').replace(/^Bearer /, ''));
   if (!who) return send(res, 401, { error: 'unauthorized' });
   // a view-only link can read its one session and nothing else

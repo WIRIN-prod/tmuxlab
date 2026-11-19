@@ -64,10 +64,10 @@ function agState(s) {
   const a = Object.keys(AG_TXT).find((k) => all.includes(k));
   return a ? `<span class="tps st-${a}">${AG_TXT[a]}</span>` : '';
 }
+// an agent is asking: only a marker and a way to the session, the answer is given in the terminal
 function promptHtml(s, w) {
   const p = w.panes.find((x) => x.prompt);
-  return `<div class="ask" data-t="${w.index}.${p.index}"><div class="aq"><span class="dot ask-dot"></span>${s.windows.length > 1 ? `<b>${esc(w.name)}</b> ` : ''}${esc(p.prompt.question)}${p.prompt.context ? `<code class="actx">${esc(p.prompt.context)}</code>` : ''}</div>
-    <div class="aopts">${p.prompt.options.map((o) => `<button class="btn sm ${o.n === 1 ? 'primary' : ''}" data-n="${o.n}" title="${esc(o.label)}">${o.n}. ${esc(o.label)}</button>`).join('')}</div></div>`;
+  return `<div class="ask" data-w="${w.index}"><span class="dot ask-dot"></span><span class="aqt">${s.windows.length > 1 ? `<b>${esc(w.name)}</b> ` : ''}${esc(p.prompt.question)}</span><button class="btn sm primary" data-go>Go</button></div>`;
 }
 
 const FOLDER = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 014.5 5h4.3l2 2.2h8.7A1.5 1.5 0 0121 8.7v9.8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18.5z" fill="currentColor" opacity=".85"/></svg>';
@@ -191,8 +191,8 @@ $('#grid').addEventListener('click', async (e) => {
   if (ph) return projectAction(e, ph.dataset.h);
   const card = e.target.closest('.card'); if (!card) return;
   const s = findSess(card.dataset.s); if (!s) return;
-  const choice = e.target.closest('.ask [data-n]');
-  if (choice) { await act(`${W(s.name, choice.closest('.ask').dataset.t)}/choose`, { n: +choice.dataset.n }); toast('Answered'); return setTimeout(refresh, 500); }
+  const go = e.target.closest('.ask [data-go]');
+  if (go) return openTerm(s.name, +go.closest('.ask').dataset.w);
   const wb = e.target.closest('.win');
   if (wb) { await act(`${W(s.name, wb.dataset.w)}/select`); return refresh().then(refreshPreviews); }
   if (e.target.closest('.screen')) return openTerm(s.name);

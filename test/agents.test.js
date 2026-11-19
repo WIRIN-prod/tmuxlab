@@ -1,4 +1,4 @@
-// Agent history, dev server ports and alert answer links, against a real server with a throwaway HOME.
+// Agent history, dev server ports and alert links, against a real server with a throwaway HOME.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -73,12 +73,7 @@ test('finds a dev server in a session and opens it through a keyed forwarder', a
   assert.equal((await api(`/api/ports/${DEV}/open`, 'POST')).body.port, f.port, 'one forwarder per port');
 });
 
-test('alert answer links need a valid one-time token', async () => {
-  const r = await fetch(`${base}/api/answer/${'x'.repeat(24)}`, { method: 'POST' });
-  assert.equal(r.status, 410);
-});
-
-test('a question alert carries one-time answer buttons that work once', async () => {
+test('a question alert carries one button that opens the session', async () => {
   const http = await import('node:http');
   const got = [];
   const ntfy = http.createServer((req, res) => { got.push(req.headers); res.end('{}'); });
@@ -89,12 +84,8 @@ test('a question alert carries one-time answer buttons that work once', async ()
     assert.equal(put.status, 200, JSON.stringify(put.body));
     await api('/api/sessions', 'POST', { name: 'ask', cwd: home, cmd: "printf 'Do you want to proceed?\\n❯ 1. Yes\\n  2. No\\n'; cat" });
     const h = await until(() => got.find((x) => x.actions));
-    const links = h.actions.split('; ').map((a) => a.split(', ')[2]);
-    assert.equal(links.length, 2);
-    assert.ok(links.every((l) => l.startsWith(`${base}/api/answer/`)));
-    const first = await fetch(links[1], { method: 'POST' });
-    assert.equal(first.status, 200, await first.text());
-    assert.equal((await fetch(links[0], { method: 'POST' })).status, 410, 'the other button is spent too');
+    assert.equal(h.actions, `view, Open, ${base}/?go=ask%3A0, clear=true`);
+    assert.equal((await fetch(`${base}/api/answer/${'x'.repeat(24)}`, { method: 'POST' })).status, 401, 'answer links are gone');
   } finally { ntfy.close(); }
 });
 
